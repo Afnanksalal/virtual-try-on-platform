@@ -46,7 +46,6 @@ type APIConfig = {
 
 // API Configuration
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const DEFAULT_TIMEOUT = 30000;
 
 class APIError extends Error {
   constructor(public status: number, message: string) {
@@ -58,21 +57,14 @@ class APIError extends Error {
 // Core API client
 const api = {
   async request<T>(endpoint: string, options: RequestInit = {}, config: APIConfig = {}): Promise<T> {
-    const controller = new AbortController();
-    const timeout = config.timeout || DEFAULT_TIMEOUT;
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
     try {
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         ...options,
-        signal: controller.signal,
         headers: {
           ...config.headers,
           ...options.headers,
         },
       });
-
-      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -81,12 +73,8 @@ const api = {
 
       return await response.json();
     } catch (error) {
-      clearTimeout(timeoutId);
       if (error instanceof APIError) throw error;
       if (error instanceof Error) {
-        if (error.name === "AbortError") {
-          throw new APIError(408, "Request timeout");
-        }
         throw new APIError(500, error.message);
       }
       throw new APIError(500, "Unknown error");
