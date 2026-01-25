@@ -1,7 +1,7 @@
 from ..loader import model_loader
 from PIL import Image
 import torch
-from ..core.logging_config import get_logger
+from app.core.logging_config import get_logger
 
 logger = get_logger("ml.tryon")
 

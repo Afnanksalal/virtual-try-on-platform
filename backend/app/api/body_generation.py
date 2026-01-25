@@ -3,9 +3,11 @@ from typing import List
 import torch
 from diffusers import AutoPipelineForText2Image
 import io
-import base64
+import uuid
+from datetime import datetime
 from PIL import Image
 from ..core.logging_config import get_logger
+from ..services.supabase_storage import supabase_storage
 
 router = APIRouter()
 logger = get_logger("api.body_generation")
@@ -50,8 +52,9 @@ async def generate_bodies(
     weight_kg: float = Form(...)
 ):
     """
-    Generate 4 full-body images using SDXL-Turbo based on user parameters.
-    Returns base64-encoded PNG images.
+    Generate 4 full-body images using SDXL-Turbo.
+    ALL images stored in Supabase ONLY.
+    Returns Supabase URLs.
     """
     try:
         # Validation
@@ -88,6 +91,10 @@ async def generate_bodies(
         
         skin_desc = skin_descriptors.get(skin_tone.lower(), "medium skin tone")
         
+        # Generate unique request ID
+        request_id = str(uuid.uuid4())
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         # Generate 4 variations
         generated_images = []
         
@@ -113,22 +120,26 @@ multiple people, cluttered background, low quality, blurry, distorted, deformed"
                 width=512,
             ).images[0]
             
-            # Convert to base64
-            buffered = io.BytesIO()
-            image.save(buffered, format="PNG", quality=95)
-            img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+            # Upload to Supabase
+            path = f"generated/{request_id}/body_{i}_{timestamp}.png"
+            public_url = supabase_storage.upload_image(
+                image,
+                bucket=supabase_storage.GENERATED_BUCKET,
+                path=path
+            )
             
             generated_images.append({
                 "id": f"body_{i}",
-                "data": f"data:image/png;base64,{img_base64}"
+                "url": public_url
             })
             
-            logger.info(f"Body variant {i+1}/4 generated successfully")
+            logger.info(f"Body variant {i+1}/4 uploaded to Supabase: {public_url}")
         
-        logger.info("All 4 body variants generated successfully")
+        logger.info("All 4 body variants generated and uploaded to Supabase")
         
         return {
             "message": "Body generation complete",
+            "request_id": request_id,
             "count": 4,
             "images": generated_images
         }

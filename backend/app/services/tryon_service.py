@@ -7,13 +7,14 @@ It manages the complete workflow from image upload to result storage.
 
 import time
 import uuid
-from pathlib import Path
+from datetime import datetime
 from typing import Dict, Optional
 from PIL import Image
 import io
 
 from ml_engine.pipelines.idm_vton import IDMVTONPipeline
 from app.core.logging_config import get_logger
+from app.services.supabase_storage import supabase_storage
 
 logger = get_logger("services.tryon")
 
@@ -32,9 +33,7 @@ class TryOnService:
     def __init__(self):
         """Initialize try-on service."""
         self.pipeline = None
-        self.results_dir = Path("data/results")
-        self.results_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("TryOnService initialized")
+        logger.info("TryOnService initialized - using Supabase storage ONLY")
     
     def _load_pipeline(self):
         """Lazy load IDM-VTON pipeline."""
@@ -49,30 +48,34 @@ class TryOnService:
         request_id: str
     ) -> str:
         """
-        Save result image to storage.
+        Save result image to Supabase storage ONLY.
         
         Args:
             result_image: Result PIL image
             request_id: Unique request identifier
             
         Returns:
-            Relative path to saved image
+            Public URL to uploaded image
         """
-        # Generate filename
-        filename = f"tryon_{request_id}.png"
-        filepath = self.results_dir / filename
+        # Generate path
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = f"tryon/{request_id}/result_{timestamp}.png"
         
-        # Save image
-        result_image.save(filepath, format="PNG", optimize=True)
-        logger.debug(f"Result saved to {filepath}")
+        # Upload to Supabase
+        public_url = supabase_storage.upload_image(
+            result_image,
+            bucket=supabase_storage.RESULTS_BUCKET,
+            path=path
+        )
         
-        # Return relative path for URL construction
-        return f"results/{filename}"
+        logger.info(f"Result uploaded to Supabase: {public_url}")
+        return public_url
     
     def process_tryon(
         self,
         person_image: Image.Image,
         garment_image: Image.Image,
+        request_id: str,
         options: Optional[Dict] = None
     ) -> Dict:
         """
@@ -85,7 +88,6 @@ class TryOnService:
                 - target_size: Target processing size (default: (512, 768))
                 - num_inference_steps: Number of diffusion steps (default: 30)
                 - guidance_scale: Guidance scale (default: 7.5)
-                - use_cache: Use cached intermediate results (default: True)
                 - return_intermediate: Return intermediate results (default: False)
         
         Returns:
@@ -93,7 +95,6 @@ class TryOnService:
                 - request_id: Unique request identifier
                 - result_url: URL to result image
                 - processing_time: Processing time in seconds
-                - cached: Whether cached results were used
                 - metadata: Additional metadata
         """
         try:
@@ -112,7 +113,6 @@ class TryOnService:
             target_size = options.get("target_size", (512, 768))
             num_inference_steps = options.get("num_inference_steps", 30)
             guidance_scale = options.get("guidance_scale", 7.5)
-            use_cache = options.get("use_cache", True)
             return_intermediate = options.get("return_intermediate", False)
             
             # Validate target size
@@ -128,7 +128,7 @@ class TryOnService:
                 raise ValueError("guidance_scale must be a non-negative number")
             
             logger.debug(f"Options: size={target_size}, steps={num_inference_steps}, "
-                        f"guidance={guidance_scale}, cache={use_cache}")
+                        f"guidance={guidance_scale}")
             
             # Run IDM-VTON pipeline
             logger.info("Running IDM-VTON pipeline...")
@@ -138,15 +138,14 @@ class TryOnService:
                 target_size=tuple(target_size),
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
-                use_cache=use_cache,
                 return_intermediate=return_intermediate,
             )
             
             result_image = pipeline_result["result"]
             
-            # Save result
-            logger.info("Saving result...")
-            result_path = self._save_result(result_image, request_id)
+            # Save result to Supabase
+            logger.info("Uploading result to Supabase...")
+            result_url = self._save_result(result_image, request_id)
             
             # Calculate processing time
             processing_time = time.time() - start_time
@@ -154,9 +153,8 @@ class TryOnService:
             # Prepare response
             response = {
                 "request_id": request_id,
-                "result_url": f"/api/v1/{result_path}",
+                "result_url": result_url,
                 "processing_time": round(processing_time, 2),
-                "cached": False,  # TODO: Implement result caching in task 6.4
                 "metadata": {
                     "target_size": target_size,
                     "num_inference_steps": num_inference_steps,
@@ -185,48 +183,6 @@ class TryOnService:
         except Exception as e:
             logger.error(f"Try-on processing failed: {e}", exc_info=True)
             raise RuntimeError(f"Virtual try-on failed: {str(e)}")
-    
-    def get_cache_stats(self) -> Dict:
-        """
-        Get cache statistics from pipeline.
-        
-        Returns:
-            Dictionary with cache statistics
-        """
-        if self.pipeline is None:
-            return {"pipeline_loaded": False}
-        
-        stats = self.pipeline.get_cache_stats()
-        stats["pipeline_loaded"] = True
-        return stats
-    
-    def clear_cache(self):
-        """Clear cached intermediate results."""
-        if self.pipeline is not None:
-            self.pipeline.clear_cache()
-            logger.info("Pipeline cache cleared")
-    
-    def cleanup_old_results(self, max_age_hours: int = 24):
-        """
-        Clean up old result files.
-        
-        Args:
-            max_age_hours: Maximum age of files to keep (in hours)
-        """
-        import time
-        
-        current_time = time.time()
-        max_age_seconds = max_age_hours * 3600
-        deleted_count = 0
-        
-        for filepath in self.results_dir.glob("tryon_*.png"):
-            file_age = current_time - filepath.stat().st_mtime
-            if file_age > max_age_seconds:
-                filepath.unlink()
-                deleted_count += 1
-        
-        if deleted_count > 0:
-            logger.info(f"Cleaned up {deleted_count} old result files")
 
 
 # Global service instance

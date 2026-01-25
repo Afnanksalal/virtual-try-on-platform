@@ -52,48 +52,42 @@ OR
 Be strict: if you can't see at least the torso and upper legs, it's "head_only".
 """
         
-        # Save image temporarily for upload
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            img.save(tmp.name, format='PNG')
-            tmp_path = tmp.name
+        # Convert image to bytes for Gemini
+        img_byte_arr = io.BytesIO()
+        img.save(img_byte_arr, format='PNG')
+        img_byte_arr.seek(0)
         
-        try:
-            # Use new Gemini SDK
-            response = gemini_client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=[
-                    types.Part.from_text(text=prompt),
-                    types.Part.from_uri(
-                        file_uri=tmp_path,
-                        mime_type='image/png'
-                    )
-                ]
-            )
-            
-            # Parse response
-            response_text = response.text.strip()
-            
-            # Extract JSON from response (sometimes Gemini wraps it in markdown)
-            if "```json" in response_text:
-                json_str = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                json_str = response_text.split("```")[1].split("```")[0].strip()
-            else:
-                json_str = response_text
-            
-            result = json.loads(json_str)
-            
-            # Validate response
-            if result.get("type") not in ["head_only", "full_body"]:
-                raise ValueError("Invalid response type from Gemini")
-            
-            logger.info(f"Image analysis result: {result}")
-            return result
-        finally:
-            # Clean up temp file
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+        # Use new Gemini SDK with inline image data
+        response = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[
+                types.Part.from_text(text=prompt),
+                types.Part.from_bytes(
+                    data=img_byte_arr.getvalue(),
+                    mime_type='image/png'
+                )
+            ]
+        )
+        
+        # Parse response
+        response_text = response.text.strip()
+        
+        # Extract JSON from response (sometimes Gemini wraps it in markdown)
+        if "```json" in response_text:
+            json_str = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            json_str = response_text.split("```")[1].split("```")[0].strip()
+        else:
+            json_str = response_text
+        
+        result = json.loads(json_str)
+        
+        # Validate response
+        if result.get("type") not in ["head_only", "full_body"]:
+            raise ValueError("Invalid response type from Gemini")
+        
+        logger.info(f"Image analysis result: {result}")
+        return result
         
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse Gemini response: {e}, response: {response_text}")

@@ -6,7 +6,6 @@ import os
 import threading
 import time
 from typing import Tuple, Dict, Any, Optional
-from collections import OrderedDict
 from app.core.logging_config import get_logger
 
 logger = get_logger("ml.loader")
@@ -34,86 +33,22 @@ class ModelLoader:
             if self._initialized:
                 return
                 
-            self.models = OrderedDict()  # LRU cache using OrderedDict
-            self.model_access_times = {}  # Track last access time for each model
+            self.models = {}  # Simple model storage
             self.device = "cuda" if torch.cuda.is_available() and os.getenv("USE_GPU", "false").lower() == "true" else "cpu"
-            self.max_cache_size = int(os.getenv("MODEL_CACHE_SIZE", "5"))  # Maximum number of models to cache
-            self.gpu_memory_threshold = float(os.getenv("GPU_MEMORY_THRESHOLD", "0.8"))  # 80% threshold
             self._initialized = True
             logger.info(f"ModelLoader initialized on device: {self.device}")
-            logger.info(f"Model cache size: {self.max_cache_size}, GPU memory threshold: {self.gpu_memory_threshold * 100}%")
     
     @classmethod
     def get_instance(cls) -> 'ModelLoader':
         """Thread-safe method to get the singleton instance."""
         return cls()
     
-    def _get_gpu_memory_usage(self) -> float:
-        """Get current GPU memory usage as a percentage (0.0 to 1.0)."""
-        if self.device == "cuda" and torch.cuda.is_available():
-            try:
-                allocated = torch.cuda.memory_allocated(0)
-                total = torch.cuda.get_device_properties(0).total_memory
-                usage = allocated / total if total > 0 else 0.0
-                return usage
-            except Exception as e:
-                logger.warning(f"Failed to get GPU memory usage: {e}")
-                return 0.0
-        return 0.0
-    
-    def _evict_lru_model(self) -> None:
-        """Evict the least recently used model from cache."""
-        if not self.models:
-            return
-        
-        # Find the least recently used model
-        lru_model_name = None
-        lru_time = float('inf')
-        
-        for model_name, access_time in self.model_access_times.items():
-            if access_time < lru_time:
-                lru_time = access_time
-                lru_model_name = model_name
-        
-        if lru_model_name:
-            logger.info(f"Evicting LRU model: {lru_model_name}")
-            del self.models[lru_model_name]
-            del self.model_access_times[lru_model_name]
-            
-            # Clear GPU cache if using CUDA
-            if self.device == "cuda":
-                torch.cuda.empty_cache()
-                logger.info(f"GPU cache cleared after evicting {lru_model_name}")
-    
-    def _check_and_evict_if_needed(self) -> None:
-        """Check cache size and GPU memory, evict models if necessary."""
-        # Check cache size limit
-        while len(self.models) >= self.max_cache_size:
-            logger.info(f"Model cache full ({len(self.models)}/{self.max_cache_size}), evicting LRU model")
-            self._evict_lru_model()
-        
-        # Check GPU memory usage
-        gpu_usage = self._get_gpu_memory_usage()
-        while gpu_usage > self.gpu_memory_threshold and self.models:
-            logger.warning(f"GPU memory usage high ({gpu_usage * 100:.1f}%), evicting LRU model")
-            self._evict_lru_model()
-            gpu_usage = self._get_gpu_memory_usage()
-    
-    def _update_model_access(self, model_name: str) -> None:
-        """Update the access time for a model (for LRU tracking)."""
-        self.model_access_times[model_name] = time.time()
-        
-        # Move to end of OrderedDict to maintain LRU order
-        if model_name in self.models:
-            self.models.move_to_end(model_name)
-    
     def get_memory_usage(self) -> Dict[str, Any]:
         """Get current memory usage statistics."""
         stats = {
             "device": self.device,
-            "cached_models": list(self.models.keys()),
-            "cache_size": len(self.models),
-            "max_cache_size": self.max_cache_size
+            "loaded_models": list(self.models.keys()),
+            "model_count": len(self.models)
         }
         
         if self.device == "cuda" and torch.cuda.is_available():
@@ -134,9 +69,6 @@ class ModelLoader:
         model_name = "segmentation"
         
         if model_name not in self.models:
-            # Check and evict if needed before loading new model
-            self._check_and_evict_if_needed()
-            
             logger.info("Loading Segmentation Model (Segformer)...")
             start_time = time.time()
             
@@ -148,48 +80,30 @@ class ModelLoader:
             load_time = time.time() - start_time
             logger.info(f"Segmentation model loaded successfully in {load_time:.2f}s")
         
-        # Update access time for LRU tracking
-        self._update_model_access(model_name)
         return self.models[model_name]
 
     def load_pose(self) -> OpenposeDetector:
         model_name = "pose"
         
         if model_name not in self.models:
-            # Check and evict if needed before loading new model
-            self._check_and_evict_if_needed()
-            
             logger.info("Loading Pose Model (OpenPose)...")
             start_time = time.time()
             
-            # controlnet_aux loads seamlessly
             model = OpenposeDetector.from_pretrained("lllyasviel/ControlNet")
-            # OpenposeDetector usually handles device internally or doesn't support .to() directly depending on version, 
-            # but usually runs on CPU or GPU automatically if torch is setup.
             
             self.models[model_name] = model
             load_time = time.time() - start_time
             logger.info(f"Pose model loaded successfully in {load_time:.2f}s")
         
-        # Update access time for LRU tracking
-        self._update_model_access(model_name)
         return self.models[model_name]
 
     def load_tryon(self) -> AutoPipelineForInpainting:
         model_name = "tryon"
         
         if model_name not in self.models:
-            # Check and evict if needed before loading new model
-            self._check_and_evict_if_needed()
-            
             logger.info("Loading Try-On Model (IDM-VTON)...")
             start_time = time.time()
             
-            # Using standard stable-diffusion-inpainting as a robust fallback base 
-            # or the specific IDM-VTON checkpoint if available. 
-            # For this MVP/Production readiness, we use a standard reliable pipe.
-            # Real IDM-VTON requires custom pipeline code often. 
-            # We will use 'diffusers' standard pipe for stability.
             model_id = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1" 
             try:
                 pipe = AutoPipelineForInpainting.from_pretrained(
@@ -205,8 +119,6 @@ class ModelLoader:
                 logger.error(f"Error loading VTON model: {e}", exc_info=True)
                 raise e
         
-        # Update access time for LRU tracking
-        self._update_model_access(model_name)
         return self.models[model_name]
     
     async def preload_models(self) -> None:

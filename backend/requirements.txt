@@ -40,6 +40,9 @@ scikit-image==0.25.0
 # Google Gen AI SDK 1.10.0 supports Python 3.9+
 google-genai==1.10.0
 
+# Supabase client for storage and database (supports Python 3.8+)
+supabase==2.14.0
+
 # Development
 python-dotenv==1.0.1
 einops==0.8.0

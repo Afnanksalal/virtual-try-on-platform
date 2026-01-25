@@ -3,8 +3,11 @@ from PIL import Image, ImageOps
 import io
 import numpy as np
 import cv2
+import uuid
+from datetime import datetime
 from ..core.logging_config import get_logger
 from ..core.file_validator import FileValidator
+from ..services.supabase_storage import supabase_storage
 
 router = APIRouter()
 logger = get_logger("api.image_composition")
@@ -19,7 +22,7 @@ async def combine_head_body(
 ):
     """
     Combine a head-only photo with a generated body image.
-    Uses face detection to extract head and composite onto body.
+    ALL files stored in Supabase ONLY.
     """
     try:
         # Validate uploaded files
@@ -80,20 +83,23 @@ async def combine_head_body(
         result = body_img.copy()
         result.paste(head_resized, (x_pos, y_pos), mask)
         
-        # Convert back to bytes
-        output_buffer = io.BytesIO()
-        result.save(output_buffer, format='PNG', quality=95)
-        output_buffer.seek(0)
+        # Upload to Supabase
+        request_id = str(uuid.uuid4())
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = f"composed/{request_id}/combined_{timestamp}.png"
         
-        # Convert to base64 for easy transmission
-        import base64
-        image_base64 = base64.b64encode(output_buffer.getvalue()).decode('utf-8')
+        public_url = supabase_storage.upload_image(
+            result,
+            bucket=supabase_storage.RESULTS_BUCKET,
+            path=path
+        )
         
-        logger.info("Successfully combined head and body images")
+        logger.info(f"Successfully combined head and body, uploaded to Supabase: {public_url}")
         
         return {
             "message": "Images combined successfully",
-            "image_data": f"data:image/png;base64,{image_base64}"
+            "request_id": request_id,
+            "image_url": public_url
         }
         
     except HTTPException:

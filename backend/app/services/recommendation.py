@@ -11,7 +11,6 @@ import httpx
 from datetime import datetime, timedelta
 from .image_collage import collage_service
 from ..core.logging_config import get_logger
-from ..core.cache_manager import cache_manager
 
 logger = get_logger("services.recommendation")
 
@@ -118,9 +117,6 @@ class RecommendationEngine:
         self.retry_delay = 1.0  # seconds
         self.retry_backoff = 2.0  # exponential backoff multiplier
         
-        # Cache configuration
-        self.cache_ttl = 3600  # 1 hour
-        
         # HTTP client with connection pooling
         self.http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(10.0, connect=5.0),
@@ -178,15 +174,6 @@ class RecommendationEngine:
         Returns:
             List of eBay products with links
         """
-        # Generate cache key from images
-        cache_key = self._generate_cache_key(user_photo, wardrobe_images, generated_images, user_id)
-        
-        # Try to get cached recommendations
-        cached_recommendations = cache_manager.get("recommendations", cache_key)
-        if cached_recommendations:
-            logger.info(f"Returning cached recommendations for key: {cache_key}")
-            return cached_recommendations
-        
         try:
             # Step 1: Create collage with labels
             all_images = [user_photo]
@@ -228,54 +215,14 @@ class RecommendationEngine:
             # Return top 10 products
             final_products = unique_products[:10]
             
-            # Cache the results
-            cache_manager.set("recommendations", cache_key, final_products, ttl=self.cache_ttl)
-            logger.info(f"Cached {len(final_products)} recommendations for key: {cache_key}")
-            
             return final_products
             
         except Exception as e:
             logger.error(f"Recommendation pipeline failed: {e}", exc_info=True)
             
-            # Try to return cached results even if expired
-            cached_recommendations = cache_manager.get("recommendations", cache_key)
-            if cached_recommendations:
-                logger.info("Returning stale cached recommendations due to error")
-                return cached_recommendations
-            
             # Return graceful error message with fallback products
-            logger.warning("No cached recommendations available, returning fallback")
+            logger.warning("Returning fallback recommendations due to error")
             return self._get_fallback_recommendations()
-    
-    def _generate_cache_key(
-        self,
-        user_photo: Image.Image,
-        wardrobe_images: Optional[List[Image.Image]],
-        generated_images: Optional[List[Image.Image]],
-        user_id: Optional[str]
-    ) -> str:
-        """Generate cache key from images and user ID."""
-        # Create hash from image data
-        hasher = hashlib.sha256()
-        
-        # Add user ID if provided
-        if user_id:
-            hasher.update(user_id.encode())
-        
-        # Add user photo hash
-        hasher.update(user_photo.tobytes())
-        
-        # Add wardrobe images
-        if wardrobe_images:
-            for img in wardrobe_images:
-                hasher.update(img.tobytes())
-        
-        # Add generated images
-        if generated_images:
-            for img in generated_images:
-                hasher.update(img.tobytes())
-        
-        return hasher.hexdigest()
     
     async def _extract_keywords_with_circuit_breaker(self, collage: Image.Image) -> List[str]:
         """Extract keywords with circuit breaker protection."""
@@ -355,42 +302,36 @@ CRITICAL: Output ONLY the JSON array, no other text."""
             try:
                 logger.info(f"Attempting Gemini Vision API call (attempt {attempt + 1}/{self.max_retries})")
                 
-                # Save image temporarily for upload
-                import tempfile
-                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                    collage.save(tmp.name, format='PNG')
-                    tmp_path = tmp.name
+                # Convert image to bytes
+                import io
+                img_byte_arr = io.BytesIO()
+                collage.save(img_byte_arr, format='PNG')
+                img_byte_arr.seek(0)
                 
-                try:
-                    # Upload image and generate content
-                    response = self.gemini_client.models.generate_content(
-                        model='gemini-2.5-flash',
-                        contents=[
-                            types.Part.from_text(text=prompt),
-                            types.Part.from_uri(
-                                file_uri=tmp_path,
-                                mime_type='image/png'
-                            )
-                        ]
-                    )
-                    
-                    text = response.text.strip()
-                    logger.debug(f"Gemini response: {text[:200]}...")
-                    
-                    # Extract JSON from response
-                    keywords = self._parse_keywords_from_response(text)
-                    
-                    if keywords and len(keywords) > 0:
-                        logger.info(f"Successfully extracted {len(keywords)} keywords from Gemini")
-                        return keywords
-                    else:
-                        logger.warning("Gemini returned empty keywords, retrying...")
-                        raise ValueError("Empty keywords returned")
-                finally:
-                    # Clean up temp file
-                    import os
-                    if os.path.exists(tmp_path):
-                        os.unlink(tmp_path)
+                # Generate content with inline image data
+                response = self.gemini_client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[
+                        types.Part.from_text(text=prompt),
+                        types.Part.from_bytes(
+                            data=img_byte_arr.getvalue(),
+                            mime_type='image/png'
+                        )
+                    ]
+                )
+                
+                text = response.text.strip()
+                logger.debug(f"Gemini response: {text[:200]}...")
+                
+                # Extract JSON from response
+                keywords = self._parse_keywords_from_response(text)
+                
+                if keywords and len(keywords) > 0:
+                    logger.info(f"Successfully extracted {len(keywords)} keywords from Gemini")
+                    return keywords
+                else:
+                    logger.warning("Gemini returned empty keywords, retrying...")
+                    raise ValueError("Empty keywords returned")
                     
             except Exception as e:
                 last_error = e

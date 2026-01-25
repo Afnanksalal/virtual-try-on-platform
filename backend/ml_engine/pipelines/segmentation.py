@@ -3,7 +3,7 @@ from PIL import Image
 import torch
 import torch.nn as nn
 import numpy as np
-from ..core.logging_config import get_logger
+from app.core.logging_config import get_logger
 
 logger = get_logger("ml.segmentation")
 

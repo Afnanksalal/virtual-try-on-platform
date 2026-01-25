@@ -4,7 +4,10 @@ from typing import List
 from PIL import Image
 import io
 from pathlib import Path
+import uuid
+from datetime import datetime
 from app.services.recommendation import recommendation_engine
+from app.services.supabase_storage import supabase_storage
 from app.core.logging_config import get_logger
 from app.core.file_validator import FileValidator
 
@@ -25,39 +28,33 @@ async def health_check():
 @router.get("/results/{filename}")
 async def get_result_image(filename: str):
     """
-    Serve result images from data/results directory.
+    Get result image URL from Supabase storage.
     
     Args:
         filename: Name of the result file
         
     Returns:
-        FileResponse with the image
+        Public URL to the image in Supabase
     """
     try:
         # Validate filename to prevent path traversal
         if ".." in filename or "/" in filename or "\\" in filename:
             raise HTTPException(400, "Invalid filename")
         
-        # Construct file path
-        results_dir = Path("data/results")
-        filepath = results_dir / filename
-        
-        # Check if file exists
-        if not filepath.exists() or not filepath.is_file():
-            raise HTTPException(404, "Result not found")
-        
-        # Return file
-        return FileResponse(
-            path=str(filepath),
-            media_type="image/png",
-            filename=filename
+        # Get public URL from Supabase
+        public_url = supabase_storage.get_public_url(
+            bucket=supabase_storage.RESULTS_BUCKET,
+            path=filename
         )
         
-    except HTTPException:
-        raise
+        return {
+            "url": public_url,
+            "filename": filename
+        }
+        
     except Exception as e:
-        logger.error(f"Failed to serve result: {e}", exc_info=True)
-        raise HTTPException(500, f"Failed to serve result: {str(e)}")
+        logger.error(f"Failed to get result URL: {e}", exc_info=True)
+        raise HTTPException(500, f"Failed to get result: {str(e)}")
 
 @router.post("/recommend")
 async def get_recommendations(
@@ -122,16 +119,11 @@ async def process_virtual_tryon(
 ):
     """
     Process virtual try-on using IDM-VTON model.
-    
-    This endpoint:
-    1. Validates uploaded images
-    2. Runs IDM-VTON pipeline (segmentation, pose, garment transfer)
-    3. Saves result to data/results/
-    4. Returns result URL and metadata
+    ALL files stored in Supabase ONLY.
     
     Returns:
         - request_id: Unique request identifier
-        - result_url: URL to result image
+        - result_url: Supabase URL to result image
         - processing_time: Processing time in seconds
         - metadata: Additional processing metadata
     """
@@ -149,6 +141,28 @@ async def process_virtual_tryon(
         user_img = Image.open(io.BytesIO(user_img_bytes))
         garment_img = Image.open(io.BytesIO(garment_img_bytes))
         
+        # Generate unique request ID
+        request_id = str(uuid.uuid4())
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Upload input images to Supabase
+        user_path = f"tryon/{request_id}/user_{timestamp}.png"
+        garment_path = f"tryon/{request_id}/garment_{timestamp}.png"
+        
+        user_url = supabase_storage.upload_image(
+            user_img,
+            bucket=supabase_storage.UPLOADS_BUCKET,
+            path=user_path
+        )
+        
+        garment_url = supabase_storage.upload_image(
+            garment_img,
+            bucket=supabase_storage.UPLOADS_BUCKET,
+            path=garment_path
+        )
+        
+        logger.info(f"Uploaded input images to Supabase: {user_url}, {garment_url}")
+        
         # Import try-on service
         from app.services.tryon_service import tryon_service
         
@@ -156,11 +170,11 @@ async def process_virtual_tryon(
         result = tryon_service.process_tryon(
             person_image=user_img,
             garment_image=garment_img,
+            request_id=request_id,
             options={
                 "target_size": (512, 768),
                 "num_inference_steps": 30,
                 "guidance_scale": 7.5,
-                "use_cache": True,
             }
         )
         

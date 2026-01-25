@@ -49,7 +49,12 @@
 - OpenCV 4.10.0.84
 
 **AI Services**:
-- Google Gen AI SDK 1.10.0 (Gemini Vision API)
+- Google Gen AI SDK 1.10.0 (Gemini 2.5 Flash - stable production model)
+  - Uses new `google-genai` package (GA as of May 2025)
+  - Replaces deprecated `google-generativeai` package
+  - Supports multimodal inputs (text, images, audio, video)
+  - Uses `types.Part.from_bytes()` for inline image data
+- Supabase 2.14.0 (Storage, Auth, Database)
 
 **Infrastructure**:
 - Docker + Docker Compose
