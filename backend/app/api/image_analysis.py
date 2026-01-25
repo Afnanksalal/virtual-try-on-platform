@@ -14,11 +14,12 @@ logger = get_logger("api.image_analysis")
 # Initialize file validator
 file_validator = FileValidator(max_size_mb=10)
 
-# Configure Gemini
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-gemini_client = None
-if GEMINI_API_KEY:
-    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+def get_gemini_client():
+    """Get Gemini client, initializing if needed."""
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_key:
+        return None
+    return genai.Client(api_key=gemini_key)
 
 @router.post("/analyze-image")
 async def analyze_image(image: UploadFile = File(...)):
@@ -27,7 +28,9 @@ async def analyze_image(image: UploadFile = File(...)):
     Returns: {"type": "head_only" | "full_body", "confidence": 0-1}
     """
     try:
+        gemini_client = get_gemini_client()
         if not gemini_client:
+            logger.error("GEMINI_API_KEY not configured")
             raise HTTPException(500, "GEMINI_API_KEY not configured")
         
         # Validate uploaded file

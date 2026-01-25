@@ -3,14 +3,21 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
 import torch
+from dotenv import load_dotenv
 from app.core.logging_config import setup_logging, get_logger
 from app.core.middleware import RequestLoggingMiddleware
 from contextlib import asynccontextmanager
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Initialize logging
 log_level = os.getenv("LOG_LEVEL", "INFO")
 setup_logging(log_level=log_level, log_file="logs/app.log")
 logger = get_logger("main")
+
+# Log environment configuration on startup
+logger.info(f"Environment loaded - GEMINI_API_KEY: {'✓ Set' if os.getenv('GEMINI_API_KEY') else '✗ Not set'}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
