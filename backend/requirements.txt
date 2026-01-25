@@ -18,6 +18,12 @@ safetensors==0.4.5
 # xformers 0.0.29.post1 supports Python 3.9-3.12
 xformers==0.0.29.post1
 huggingface-hub==0.27.1
+# ControlNet auxiliary models for pose detection
+controlnet-aux==0.0.9
+# Segmentation model support (required by transformers)
+timm==1.0.12
+# ONNX runtime for controlnet-aux
+onnxruntime==1.21.0
 
 # Image Processing
 # Pillow 11.1.0 supports Python 3.9+
@@ -27,6 +33,8 @@ numpy==2.2.2
 # OpenCV 4.10.0.84 supports Python 3.8+
 opencv-python==4.10.0.84
 python-magic==0.4.27
+# Image manipulation
+scikit-image==0.25.0
 
 # AI Services
 # Google Gen AI SDK 1.10.0 supports Python 3.9+
