@@ -32,7 +32,6 @@ from ..loader import model_loader
 from .segmentation import SegmentationPipeline
 from .pose import PosePipeline
 from app.core.logging_config import get_logger
-from app.core.cache_manager import cache_manager
 
 logger = get_logger("ml.idm_vton")
 
@@ -50,7 +49,6 @@ class IDMVTONPipeline:
         device: Optional[str] = None,
         dtype: Optional[torch.dtype] = None,
         enable_xformers: bool = True,
-        use_redis_cache: bool = True,
     ):
         """
         Initialize IDM-VTON pipeline.
@@ -59,12 +57,10 @@ class IDMVTONPipeline:
             device: Device to run inference on ('cuda' or 'cpu')
             dtype: Data type for model weights (torch.float16 or torch.float32)
             enable_xformers: Enable memory-efficient attention with xformers
-            use_redis_cache: Use Redis for caching intermediate results
         """
         self.device = device or model_loader.device
         self.dtype = dtype or (torch.float16 if self.device == "cuda" else torch.float32)
         self.enable_xformers = enable_xformers
-        self.use_redis_cache = use_redis_cache
         
         # Sub-pipelines
         self.segmentation_pipeline = None
@@ -75,12 +71,7 @@ class IDMVTONPipeline:
         # Model paths
         self.weights_dir = Path(__file__).parent.parent / "weights" / "idm-vton"
         
-        # Cache namespaces
-        self.segmentation_namespace = "segmentation"
-        self.pose_namespace = "pose"
-        
         logger.info(f"IDM-VTON pipeline initialized on {self.device} with dtype {self.dtype}")
-        logger.info(f"Redis caching: {'enabled' if use_redis_cache else 'disabled'}")
     
     def _load_models(self):
         """Lazy load all required models."""
@@ -183,91 +174,46 @@ class IDMVTONPipeline:
         
         return image
     
+    
     def _get_image_hash(self, image: Image.Image) -> str:
-        """Generate hash for image caching."""
+        """Generate hash for image (unused, kept for compatibility)."""
         img_bytes = image.tobytes()
         return hashlib.md5(img_bytes).hexdigest()
     
     def _extract_segmentation_mask(
         self,
         person_image: Image.Image,
-        use_cache: bool = True
     ) -> np.ndarray:
         """
         Extract segmentation mask for person image.
         
         Args:
             person_image: Person image
-            use_cache: Whether to use cached results
             
         Returns:
             Segmentation mask as numpy array
         """
-        # Generate cache key
-        img_hash = self._get_image_hash(person_image)
-        
-        # Check cache
-        if use_cache and self.use_redis_cache:
-            cached_mask = cache_manager.get(self.segmentation_namespace, img_hash)
-            if cached_mask is not None:
-                logger.debug("Using cached segmentation mask from Redis")
-                return cached_mask
-        
-        # Run segmentation
         logger.debug("Extracting segmentation mask...")
         result = self.segmentation_pipeline(person_image)
         mask = result["segmentation_map"]
-        
-        # Cache result in Redis
-        if use_cache and self.use_redis_cache:
-            cache_manager.set(
-                self.segmentation_namespace,
-                img_hash,
-                mask,
-                ttl=86400  # 24 hours
-            )
-            logger.debug("Cached segmentation mask in Redis")
         
         return mask
     
     def _extract_pose_keypoints(
         self,
         person_image: Image.Image,
-        use_cache: bool = True
     ) -> Image.Image:
         """
         Extract pose keypoints from person image.
         
         Args:
             person_image: Person image
-            use_cache: Whether to use cached results
             
         Returns:
             Pose map as PIL image
         """
-        # Generate cache key
-        img_hash = self._get_image_hash(person_image)
-        
-        # Check cache
-        if use_cache and self.use_redis_cache:
-            cached_pose = cache_manager.get(self.pose_namespace, img_hash)
-            if cached_pose is not None:
-                logger.debug("Using cached pose keypoints from Redis")
-                return cached_pose
-        
-        # Run pose estimation
         logger.debug("Extracting pose keypoints...")
         pose_map = self.pose_pipeline(person_image)
-        
-        # Cache result in Redis
-        if use_cache and self.use_redis_cache:
-            cache_manager.set(
-                self.pose_namespace,
-                img_hash,
-                pose_map,
-                ttl=86400  # 24 hours
-            )
-            logger.debug("Cached pose keypoints in Redis")
         
         return pose_map
     
@@ -384,7 +330,6 @@ class IDMVTONPipeline:
         target_size: Tuple[int, int] = (512, 768),
         num_inference_steps: int = 30,
         guidance_scale: float = 7.5,
-        use_cache: bool = True,
         return_intermediate: bool = False,
     ) -> Dict:
         """
@@ -396,7 +341,6 @@ class IDMVTONPipeline:
             target_size: Target processing size (width, height)
             num_inference_steps: Number of diffusion steps
             guidance_scale: Classifier-free guidance scale
-            use_cache: Whether to use cached intermediate results
             return_intermediate: Whether to return intermediate results
             
         Returns:
@@ -420,17 +364,11 @@ class IDMVTONPipeline:
             
             # Step 2: Segmentation
             logger.info("Step 2/5: Extracting segmentation mask...")
-            segmentation_mask = self._extract_segmentation_mask(
-                person_image_processed,
-                use_cache=use_cache
-            )
+            segmentation_mask = self._extract_segmentation_mask(person_image_processed)
             
             # Step 3: Pose Estimation
             logger.info("Step 3/5: Extracting pose keypoints...")
-            pose_map = self._extract_pose_keypoints(
-                person_image_processed,
-                use_cache=use_cache
-            )
+            pose_map = self._extract_pose_keypoints(person_image_processed)
             
             # Step 4: Create inpainting mask
             logger.info("Step 4/5: Creating inpainting mask...")
@@ -471,30 +409,3 @@ class IDMVTONPipeline:
         except Exception as e:
             logger.error(f"IDM-VTON pipeline failed: {e}", exc_info=True)
             raise RuntimeError(f"IDM-VTON pipeline error: {e}")
-    
-    def clear_cache(self):
-        """Clear cached intermediate results."""
-        if self.use_redis_cache:
-            seg_deleted = cache_manager.clear_namespace(self.segmentation_namespace)
-            pose_deleted = cache_manager.clear_namespace(self.pose_namespace)
-            logger.info(f"Cleared Redis cache: {seg_deleted} segmentation, {pose_deleted} pose")
-        else:
-            logger.info("Redis caching disabled, no cache to clear")
-    
-    def get_cache_stats(self) -> Dict:
-        """Get cache statistics."""
-        if self.use_redis_cache:
-            stats = cache_manager.get_stats()
-            return {
-                "redis_enabled": True,
-                "cache_backend": stats["backend"],
-                "cache_hits": stats["hits"],
-                "cache_misses": stats["misses"],
-                "cache_hit_rate": stats["hit_rate"],
-                "cache_sets": stats["sets"],
-            }
-        else:
-            return {
-                "redis_enabled": False,
-                "cache_backend": "disabled",
-            }
