@@ -168,23 +168,27 @@ export default function OnboardPage() {
         publicUrl = url;
       }
 
-      // Create profile
+      // Create profile - use upsert to handle existing profiles
+      const profileData = {
+        id: session.user.id,
+        email: session.user.email,
+        name: formData.name.trim(),
+        age: parseInt(formData.age),
+        gender: formData.gender,
+        height_cm: parseFloat(formData.height),
+        weight_kg: parseFloat(formData.weight),
+        photo_url: publicUrl,
+        updated_at: new Date().toISOString()
+      };
+
       const { error: profileError } = await supabase
         .from('profiles')
-        .insert({
-          id: session.user.id,
-          email: session.user.email,
-          name: formData.name.trim(),
-          age: parseInt(formData.age),
-          gender: formData.gender,
-          height_cm: parseFloat(formData.height),
-          weight_kg: parseFloat(formData.weight),
-          photo_url: publicUrl,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
+        .upsert(profileData, { onConflict: 'id' });
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        console.error("Profile error details:", profileError);
+        throw new Error(`Profile creation failed: ${profileError.message}`);
+      }
       
       localStorage.setItem("user_name", formData.name.trim());
       toast.success("Profile created successfully!");
@@ -194,6 +198,9 @@ export default function OnboardPage() {
       console.error("Error:", error);
       const message = error instanceof Error ? error.message : "Failed to create profile";
       toast.error(message);
+      // Reset to photo step so user can try again
+      setStep("photo");
+      setPhotoType(null);
     } finally {
       setLoading(false);
     }
