@@ -1,5 +1,6 @@
 import os
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from typing import List, Dict, Optional
 from PIL import Image
 import json
@@ -145,11 +146,10 @@ class RecommendationEngine:
         
         # Configure Gemini
         if self.gemini_key:
-            genai.configure(api_key=self.gemini_key)
-            self.vision_model = genai.GenerativeModel('gemini-1.5-flash')
+            self.gemini_client = genai.Client(api_key=self.gemini_key)
         else:
             logger.warning("GEMINI_API_KEY not set")
-            self.vision_model = None
+            self.gemini_client = None
         
         if not self.rapidapi_key:
             logger.warning("RAPIDAPI_KEY not set")
@@ -321,7 +321,7 @@ class RecommendationEngine:
         Use Gemini Vision to extract clothing keywords with color theory.
         Implements retry logic with exponential backoff.
         """
-        if not self.vision_model:
+        if not self.gemini_client:
             logger.error("Gemini API not configured, using fallback keywords")
             return self._get_fallback_keywords()
         
@@ -355,21 +355,42 @@ CRITICAL: Output ONLY the JSON array, no other text."""
             try:
                 logger.info(f"Attempting Gemini Vision API call (attempt {attempt + 1}/{self.max_retries})")
                 
-                # Generate content with timeout
-                response = self.vision_model.generate_content([prompt, collage])
-                text = response.text.strip()
+                # Save image temporarily for upload
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                    collage.save(tmp.name, format='PNG')
+                    tmp_path = tmp.name
                 
-                logger.debug(f"Gemini response: {text[:200]}...")
-                
-                # Extract JSON from response
-                keywords = self._parse_keywords_from_response(text)
-                
-                if keywords and len(keywords) > 0:
-                    logger.info(f"Successfully extracted {len(keywords)} keywords from Gemini")
-                    return keywords
-                else:
-                    logger.warning("Gemini returned empty keywords, retrying...")
-                    raise ValueError("Empty keywords returned")
+                try:
+                    # Upload image and generate content
+                    response = self.gemini_client.models.generate_content(
+                        model='gemini-2.0-flash-exp',
+                        contents=[
+                            types.Part.from_text(text=prompt),
+                            types.Part.from_uri(
+                                file_uri=tmp_path,
+                                mime_type='image/png'
+                            )
+                        ]
+                    )
+                    
+                    text = response.text.strip()
+                    logger.debug(f"Gemini response: {text[:200]}...")
+                    
+                    # Extract JSON from response
+                    keywords = self._parse_keywords_from_response(text)
+                    
+                    if keywords and len(keywords) > 0:
+                        logger.info(f"Successfully extracted {len(keywords)} keywords from Gemini")
+                        return keywords
+                    else:
+                        logger.warning("Gemini returned empty keywords, retrying...")
+                        raise ValueError("Empty keywords returned")
+                finally:
+                    # Clean up temp file
+                    import os
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
                     
             except Exception as e:
                 last_error = e

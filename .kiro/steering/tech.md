@@ -29,26 +29,27 @@
 
 ## Backend
 
-**Framework**: FastAPI 0.109.0
-- Uvicorn ASGI server
-- Pydantic for data validation
+**Framework**: FastAPI 0.115.6
+- Uvicorn ASGI server 0.34.0
+- Pydantic 2.10.5 for data validation
 - Python-multipart for file uploads
 
 **ML/AI Stack**:
-- PyTorch 2.1.2 + TorchVision 0.16.2
-- Diffusers 0.25.0 (SDXL body generation)
-- Transformers 4.36.2
-- Accelerate 0.25.0
-- xformers 0.23 (memory-efficient attention)
-- safetensors 0.4.2
+- PyTorch 2.5.1 + TorchVision 0.20.1
+- Diffusers 0.32.2 (SDXL body generation)
+- Transformers 4.48.2
+- Accelerate 1.2.1
+- xformers 0.0.29.post1 (memory-efficient attention)
+- safetensors 0.4.5
+- huggingface-hub 0.27.1
 
 **Image Processing**:
-- Pillow 10.2.0
-- NumPy 1.26.3
-- OpenCV 4.9.0.80
+- Pillow 11.1.0
+- NumPy 2.2.2
+- OpenCV 4.10.0.84
 
 **AI Services**:
-- Google Generative AI (Gemini Vision API)
+- Google Gen AI SDK 1.10.0 (Gemini Vision API)
 
 **Infrastructure**:
 - Docker + Docker Compose
