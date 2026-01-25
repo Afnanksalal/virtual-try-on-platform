@@ -32,7 +32,8 @@ pillow==11.1.0
 numpy==2.2.2
 # OpenCV 4.10.0.84 supports Python 3.8+
 opencv-python==4.10.0.84
-python-magic==0.4.27
+# Pure Python file type detection (no system dependencies)
+filetype==1.2.0
 # Image manipulation
 scikit-image==0.25.0
 

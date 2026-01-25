@@ -23,8 +23,9 @@ type TryOnResponse = {
 
 type BodyGenerationResponse = {
   message: string;
+  request_id: string;
   count: number;
-  images: Array<{ id: string; data: string }>;
+  images: Array<{ id: string; url: string }>;
 };
 
 type ImageAnalysisResponse = {
@@ -34,7 +35,8 @@ type ImageAnalysisResponse = {
 
 type ImageCompositionResponse = {
   message: string;
-  image_data: string;
+  request_id: string;
+  image_url: string;
 };
 
 type APIConfig = {

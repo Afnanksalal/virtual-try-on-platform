@@ -11,7 +11,7 @@ Implements comprehensive validation including:
 
 import os
 import re
-import magic
+import filetype
 from typing import Optional, Set
 from fastapi import UploadFile, HTTPException
 from dataclasses import dataclass
@@ -188,9 +188,11 @@ class FileValidator:
             Detected MIME type
         """
         try:
-            mime = magic.Magic(mime=True)
-            detected_type = mime.from_buffer(content)
-            return detected_type
+            kind = filetype.guess(content)
+            if kind is None:
+                logger.warning("Could not detect file type from content")
+                return "application/octet-stream"
+            return kind.mime
         except Exception as e:
             logger.error(f"Content type detection failed: {e}")
             return "application/octet-stream"

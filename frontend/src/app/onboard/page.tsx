@@ -24,7 +24,7 @@ export default function OnboardPage() {
   });
   const [loading, setLoading] = useState(false);
   const [photoType, setPhotoType] = useState<"head_only" | "full_body" | null>(null);
-  const [generatedBodies, setGeneratedBodies] = useState<Array<{id: string; data: string}>>([]);
+  const [generatedBodies, setGeneratedBodies] = useState<Array<{id: string; url: string}>>([]);
   const [selectedBody, setSelectedBody] = useState<string>("");
   const [composedImage, setComposedImage] = useState<string>("");
 
@@ -94,23 +94,23 @@ export default function OnboardPage() {
     }
   };
 
-  const    handleBodySelect = async (bodyData: string) => {
-    setSelectedBody(bodyData);
+  const handleBodySelect = async (bodyUrl: string) => {
+    setSelectedBody(bodyUrl);
     setLoading(true);
     
     try {
       if (!formData.file) return;
       
-      // Convert base64 to File
-      const bodyFile = await fetch(bodyData).then(r => r.blob()).then(b => new File([b], "body.png"));
+      // Fetch body image from Supabase URL
+      const bodyFile = await fetch(bodyUrl).then(r => r.blob()).then(b => new File([b], "body.png"));
       
       // Combine head + body
       const result = await endpoints.combineHeadBody(formData.file, bodyFile);
-      setComposedImage(result.image_data);
+      setComposedImage(result.image_url);
       
       toast.success("Images combined successfully!");
       // Proceed to save
-      await saveProfile(result.image_data);
+      await saveProfile(result.image_url);
     } catch (error) {
       console.error("Combination error:", error);
       toast.error("Failed to combine images. Please try again.");
@@ -118,7 +118,7 @@ export default function OnboardPage() {
     }
   };
 
-  const saveProfile = async (photoDataUrl?: string) => {
+  const saveProfile = async (photoUrl?: string) => {
     const {data: { session } } = await supabase.auth.getSession();
     if (!session) {
       toast.error("Session expired. Please log in again.");
@@ -130,22 +130,27 @@ export default function OnboardPage() {
     try {
       let publicUrl = "";
       
-      if (photoDataUrl) {
-        // Upload composed image
-        const blob = await fetch(photoDataUrl).then(r => r.blob());
-        const file = new File([blob], `composed_${Date.now()}.png`);
-        
-        const fileName = `${session.user.id}/${Date.now()}_composed.png`;
-        const { error: uploadError } = await supabase.storage
-          .from('user-uploads')
-          .upload(fileName, file, { cacheControl: '3600', upsert: false });
+      if (photoUrl) {
+        // If it's already a Supabase URL from backend, use it directly
+        if (photoUrl.includes('supabase.co')) {
+          publicUrl = photoUrl;
+        } else {
+          // If it's a data URL, upload it
+          const blob = await fetch(photoUrl).then(r => r.blob());
+          const file = new File([blob], `composed_${Date.now()}.png`);
+          
+          const fileName = `${session.user.id}/${Date.now()}_composed.png`;
+          const { error: uploadError } = await supabase.storage
+            .from('user-uploads')
+            .upload(fileName, file, { cacheControl: '3600', upsert: false });
 
-        if (uploadError) throw uploadError;
+          if (uploadError) throw uploadError;
 
-        const { data: { publicUrl: url } } = supabase.storage
-          .from('user-uploads')
-          .getPublicUrl(fileName);
-        publicUrl = url;
+          const { data: { publicUrl: url } } = supabase.storage
+            .from('user-uploads')
+            .getPublicUrl(fileName);
+          publicUrl = url;
+        }
       } else {
         // Upload original photo
         if (!formData.file) throw new Error("No photo");
@@ -364,11 +369,11 @@ export default function OnboardPage() {
                       {generatedBodies.map((body) => (
                         <button
                           key={body.id}
-                          onClick={() => handleBodySelect(body.data)}
+                          onClick={() => handleBodySelect(body.url)}
                           disabled={loading}
                           className="aspect-square border-2 border-gray-200 rounded-xl hover:border-black transition-all disabled:opacity-50 overflow-hidden"
                         >
-                          <Image src={body.data} alt={`Body ${body.id}`} width={200} height={300} className="object-cover" />
+                          <Image src={body.url} alt={`Body ${body.id}`} width={200} height={300} className="object-cover" />
                         </button>
                       ))}
                     </div>
