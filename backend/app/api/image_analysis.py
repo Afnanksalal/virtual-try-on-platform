@@ -58,7 +58,7 @@ Be strict: if you can't see at least the torso and upper legs, it's "head_only".
         try:
             # Use new Gemini SDK
             response = gemini_client.models.generate_content(
-                model='gemini-2.0-flash-exp',
+                model='gemini-2.5-flash',
                 contents=[
                     types.Part.from_text(text=prompt),
                     types.Part.from_uri(

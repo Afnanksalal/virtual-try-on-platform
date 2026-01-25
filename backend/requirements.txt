@@ -20,8 +20,8 @@ xformers==0.0.29.post1
 huggingface-hub==0.27.1
 # ControlNet auxiliary models for pose detection
 controlnet-aux==0.0.9
-# Segmentation model support (required by transformers)
-timm==1.0.12
+# Segmentation model support (required by controlnet-aux, must be <=0.6.7)
+timm==0.6.7
 # ONNX runtime for controlnet-aux
 onnxruntime==1.21.0
 
