@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
-from typing import List
+from typing import List, Optional
 from PIL import Image
 import io
 from pathlib import Path
@@ -53,16 +53,34 @@ async def get_result_image(filename: str):
 async def get_recommendations(
     user_photo: UploadFile = File(...),
     wardrobe_images: List[UploadFile] = File(default=[]),
-    generated_images: List[UploadFile] = File(default=[])
+    generated_images: List[UploadFile] = File(default=[]),
+    height_cm: Optional[float] = Form(None),
+    weight_kg: Optional[float] = Form(None),
+    body_type: Optional[str] = Form(None),
+    ethnicity: Optional[str] = Form(None),
+    gender: Optional[str] = Form(None),
+    style_preference: Optional[str] = Form(None)
 ):
     """
     Get AI-powered outfit recommendations using image collage + Gemini Vision + eBay search.
     
     Pipeline:
     1. Create collage from user photo, wardrobe, generated images
-    2. Gemini Vision extracts keywords with color theory
-    3. Search eBay via RapidAPI
-    4. Return products with buy links
+    2. Gemini Vision analyzes with user profile data (height, weight, body type, etc.)
+    3. Extract keywords with color theory and personalization
+    4. Search eBay via RapidAPI
+    5. Return products with buy links
+    
+    Args:
+        user_photo: User's photo
+        wardrobe_images: Optional wardrobe items
+        generated_images: Optional generated body images
+        height_cm: User height in cm (140-220)
+        weight_kg: User weight in kg (40-200)
+        body_type: Body type (slim, athletic, average, curvy, plus_size)
+        ethnicity: Ethnicity for skin tone matching
+        gender: Gender for style preferences
+        style_preference: User's style preferences
     """
     try:
         # Validate user photo
@@ -92,11 +110,29 @@ async def get_recommendations(
             img_bytes = await img_file.read()
             generated_imgs.append(Image.open(io.BytesIO(img_bytes)))
         
+        # Build user profile dictionary
+        user_profile = {}
+        if height_cm is not None:
+            user_profile['height_cm'] = height_cm
+        if weight_kg is not None:
+            user_profile['weight_kg'] = weight_kg
+        if body_type:
+            user_profile['body_type'] = body_type
+        if ethnicity:
+            user_profile['ethnicity'] = ethnicity
+        if gender:
+            user_profile['gender'] = gender
+        if style_preference:
+            user_profile['style_preference'] = style_preference
+        
+        logger.info(f"Recommendation request with user profile: {user_profile}")
+        
         # Get recommendations
         products = await recommendation_engine.get_outfit_recommendations(
             user_photo=user_img,
             wardrobe_images=wardrobe_imgs if wardrobe_imgs else None,
-            generated_images=generated_imgs if generated_imgs else None
+            generated_images=generated_imgs if generated_imgs else None,
+            user_profile=user_profile if user_profile else None
         )
         
         return products

@@ -160,6 +160,7 @@ class RecommendationEngine:
         user_photo: Image.Image,
         wardrobe_images: List[Image.Image] = None,
         generated_images: List[Image.Image] = None,
+        user_profile: Optional[Dict] = None,
         user_id: Optional[str] = None
     ) -> List[Dict]:
         """
@@ -169,6 +170,7 @@ class RecommendationEngine:
             user_photo: User's profile photo
             wardrobe_images: List of wardrobe items
             generated_images: Generated body/outfit images
+            user_profile: User profile data (height, weight, body_type, ethnicity, gender, style_preference)
             user_id: Optional user ID for per-user caching
             
         Returns:
@@ -194,8 +196,8 @@ class RecommendationEngine:
             )
             logger.info(f"Created collage from {len(all_images)} images with labels")
             
-            # Step 2: Extract keywords with Gemini Vision (with circuit breaker)
-            keywords = await self._extract_keywords_with_circuit_breaker(collage)
+            # Step 2: Extract keywords with Gemini Vision (with circuit breaker and user profile)
+            keywords = await self._extract_keywords_with_circuit_breaker(collage, user_profile)
             logger.info(f"Extracted keywords: {keywords}")
             
             # Step 3: Search eBay for each keyword (with circuit breaker)
@@ -224,7 +226,7 @@ class RecommendationEngine:
             logger.warning("Returning fallback recommendations due to error")
             return self._get_fallback_recommendations()
     
-    async def _extract_keywords_with_circuit_breaker(self, collage: Image.Image) -> List[str]:
+    async def _extract_keywords_with_circuit_breaker(self, collage: Image.Image, user_profile: Optional[Dict] = None) -> List[str]:
         """Extract keywords with circuit breaker protection."""
         if self.gemini_circuit_breaker.is_open():
             logger.warning("Gemini circuit breaker is OPEN, using fallback keywords")
@@ -233,20 +235,21 @@ class RecommendationEngine:
         try:
             return self.gemini_circuit_breaker.call(
                 self._extract_keywords_with_color_theory_sync,
-                collage
+                collage,
+                user_profile
             )
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
             return self._get_fallback_keywords()
     
-    def _extract_keywords_with_color_theory_sync(self, collage: Image.Image) -> List[str]:
+    def _extract_keywords_with_color_theory_sync(self, collage: Image.Image, user_profile: Optional[Dict] = None) -> List[str]:
         """Synchronous version for circuit breaker."""
         # This is a wrapper to make the async method work with circuit breaker
         import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(self._extract_keywords_with_color_theory(collage))
+            return loop.run_until_complete(self._extract_keywords_with_color_theory(collage, user_profile))
         finally:
             loop.close()
     
@@ -263,31 +266,74 @@ class RecommendationEngine:
             self.ebay_circuit_breaker.on_failure()
             return self._get_fallback_product(query)
     
-    async def _extract_keywords_with_color_theory(self, collage: Image.Image) -> List[str]:
+    async def _extract_keywords_with_color_theory(self, collage: Image.Image, user_profile: Optional[Dict] = None) -> List[str]:
         """
-        Use Gemini Vision to extract clothing keywords with color theory.
+        Use Gemini Vision to extract clothing keywords with color theory and user profile.
         Implements retry logic with exponential backoff.
         """
         if not self.gemini_client:
             logger.error("Gemini API not configured, using fallback keywords")
             return self._get_fallback_keywords()
         
-        prompt = """Analyze this fashion collage image carefully.
+        # Build user profile context for the prompt
+        profile_context = ""
+        if user_profile:
+            profile_parts = []
+            
+            if 'height_cm' in user_profile and 'weight_kg' in user_profile:
+                height = user_profile['height_cm']
+                weight = user_profile['weight_kg']
+                profile_parts.append(f"Height: {height}cm, Weight: {weight}kg")
+            
+            if 'body_type' in user_profile:
+                body_type = user_profile['body_type'].replace('_', ' ').title()
+                profile_parts.append(f"Body Type: {body_type}")
+            
+            if 'ethnicity' in user_profile:
+                ethnicity = user_profile['ethnicity'].replace('_', ' ').title()
+                profile_parts.append(f"Ethnicity: {ethnicity}")
+            
+            if 'gender' in user_profile:
+                gender = user_profile['gender'].replace('_', ' ').title()
+                profile_parts.append(f"Gender: {gender}")
+            
+            if 'style_preference' in user_profile:
+                style = user_profile['style_preference']
+                profile_parts.append(f"Style Preference: {style}")
+            
+            if profile_parts:
+                profile_context = f"\n\n**User Profile:**\n" + "\n".join(f"- {part}" for part in profile_parts)
+        
+        prompt = f"""Analyze this fashion collage image carefully.{profile_context}
 
 Extract clothing recommendation keywords based on:
-1. **Color Theory**: Identify dominant colors and suggest complementary/analogous colors
+
+1. **User Profile Analysis**: 
+   - Consider the user's body measurements, body type, and ethnicity for fit and flattering styles
+   - Recommend sizes and cuts that work well for their body type
+   - Suggest colors that complement their skin tone
+   - Align with their stated style preferences
+
+2. **Color Theory**: Identify dominant colors and suggest complementary/analogous colors
    - Complementary: Opposite on color wheel (e.g., blue → orange)
    - Analogous: Adjacent colors (e.g., blue → blue-green → green)
    - Triadic: Evenly spaced colors
-   
-2. **Style Analysis**: Identify clothing style (casual, formal, sporty, elegant)
+   - Consider skin tone for color matching
 
-3. **Body Type Considerations**: Suggest items that would flatter the body type shown
+3. **Style Analysis**: Identify clothing style (casual, formal, sporty, elegant)
+   - Match recommendations to user's style preference if provided
 
-4. **Items Needed**: Suggest specific clothing items that would complete the wardrobe
+4. **Body Type Considerations**: Suggest items that would flatter the body type shown
+   - For slim: Add volume and structure
+   - For athletic: Emphasize proportions
+   - For curvy: Highlight curves with proper fit
+   - For plus size: Flattering cuts and proportions
+
+5. **Items Needed**: Suggest specific clothing items that would complete the wardrobe
+   - Include size considerations (e.g., "plus size", "petite", "tall")
 
 Output ONLY a JSON array of search keywords (strings), 5-8 keywords maximum.
-Each keyword should be specific and eBay-searchable (e.g., "navy blue blazer", "white dress shirt").
+Each keyword should be specific and eBay-searchable (e.g., "navy blue blazer", "plus size black dress pants").
 
 Example output:
 ["navy blue blazer", "white dress shirt", "burgundy tie", "black dress pants", "brown leather shoes"]
@@ -327,7 +373,7 @@ CRITICAL: Output ONLY the JSON array, no other text."""
                 keywords = self._parse_keywords_from_response(text)
                 
                 if keywords and len(keywords) > 0:
-                    logger.info(f"Successfully extracted {len(keywords)} keywords from Gemini")
+                    logger.info(f"Successfully extracted {len(keywords)} keywords from Gemini with user profile")
                     return keywords
                 else:
                     logger.warning("Gemini returned empty keywords, retrying...")

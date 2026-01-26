@@ -56,26 +56,51 @@ class SupabaseStorageService:
         image: Image.Image,
         bucket: str,
         path: str,
-        content_type: str = "image/png"
+        content_type: str = "image/png",
+        max_size_mb: float = 5.0,
+        quality: int = 85
     ) -> str:
         """
-        Upload PIL Image to Supabase storage.
+        Upload PIL Image to Supabase storage with automatic compression.
         
         Args:
             image: PIL Image object
             bucket: Bucket name
             path: File path in bucket
             content_type: MIME type
+            max_size_mb: Maximum file size in MB (default 5MB)
+            quality: JPEG quality for compression (1-100, default 85)
             
         Returns:
             Public URL of uploaded file
         """
         try:
+            # Compress image if needed
+            compressed_image = self._compress_image(image, max_size_mb, quality)
+            
             # Convert PIL Image to bytes
             img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format='PNG')
+            
+            # Use JPEG for better compression, PNG for transparency
+            if compressed_image.mode in ('RGBA', 'LA', 'P'):
+                # Has transparency, use PNG with optimization
+                compressed_image.save(img_byte_arr, format='PNG', optimize=True)
+                content_type = "image/png"
+            else:
+                # No transparency, use JPEG for better compression
+                if compressed_image.mode != 'RGB':
+                    compressed_image = compressed_image.convert('RGB')
+                compressed_image.save(img_byte_arr, format='JPEG', quality=quality, optimize=True)
+                content_type = "image/jpeg"
+                # Update path extension if needed
+                if path.endswith('.png'):
+                    path = path.rsplit('.', 1)[0] + '.jpg'
+            
             img_byte_arr.seek(0)
             file_data = img_byte_arr.getvalue()
+            file_size_mb = len(file_data) / (1024 * 1024)
+            
+            logger.info(f"Compressed image to {file_size_mb:.2f}MB for upload")
             
             # Upload to Supabase
             response = self.client.storage.from_(bucket).upload(
@@ -90,33 +115,97 @@ class SupabaseStorageService:
             # Get public URL
             public_url = self.client.storage.from_(bucket).get_public_url(path)
             
-            logger.info(f"Uploaded image to {bucket}/{path}")
+            logger.info(f"Uploaded image to {bucket}/{path} ({file_size_mb:.2f}MB)")
             return public_url
             
         except Exception as e:
             logger.error(f"Failed to upload image to Supabase: {e}", exc_info=True)
             raise RuntimeError(f"Supabase upload failed: {str(e)}")
     
+    def _compress_image(
+        self,
+        image: Image.Image,
+        max_size_mb: float = 5.0,
+        quality: int = 85,
+        max_dimension: int = 2048
+    ) -> Image.Image:
+        """
+        Compress image to meet size requirements.
+        
+        Args:
+            image: PIL Image object
+            max_size_mb: Maximum file size in MB
+            quality: JPEG quality (1-100)
+            max_dimension: Maximum width or height
+            
+        Returns:
+            Compressed PIL Image
+        """
+        # Resize if too large
+        width, height = image.size
+        if width > max_dimension or height > max_dimension:
+            ratio = min(max_dimension / width, max_dimension / height)
+            new_size = (int(width * ratio), int(height * ratio))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+            logger.info(f"Resized image from {width}x{height} to {new_size[0]}x{new_size[1]}")
+        
+        # Check size and reduce quality if needed
+        for attempt_quality in range(quality, 50, -10):
+            img_byte_arr = io.BytesIO()
+            
+            # Convert to RGB for JPEG compression test
+            test_image = image.convert('RGB') if image.mode != 'RGB' else image
+            test_image.save(img_byte_arr, format='JPEG', quality=attempt_quality, optimize=True)
+            
+            size_mb = len(img_byte_arr.getvalue()) / (1024 * 1024)
+            
+            if size_mb <= max_size_mb:
+                logger.info(f"Image compressed to {size_mb:.2f}MB at quality {attempt_quality}")
+                return image
+        
+        # If still too large, resize more aggressively
+        logger.warning(f"Image still too large, applying aggressive resize")
+        width, height = image.size
+        ratio = 0.7
+        new_size = (int(width * ratio), int(height * ratio))
+        image = image.resize(new_size, Image.Resampling.LANCZOS)
+        
+        return image
+    
     def upload_bytes(
         self,
         file_data: bytes,
         bucket: str,
         path: str,
-        content_type: str = "image/png"
+        content_type: str = "image/png",
+        compress: bool = True,
+        max_size_mb: float = 5.0
     ) -> str:
         """
-        Upload raw bytes to Supabase storage.
+        Upload raw bytes to Supabase storage with optional compression.
         
         Args:
             file_data: File bytes
             bucket: Bucket name
             path: File path in bucket
             content_type: MIME type
+            compress: Whether to compress image data
+            max_size_mb: Maximum file size in MB if compressing
             
         Returns:
             Public URL of uploaded file
         """
         try:
+            # Compress if requested and it's an image
+            if compress and content_type.startswith('image/'):
+                try:
+                    # Convert bytes to PIL Image
+                    image = Image.open(io.BytesIO(file_data))
+                    # Use upload_image for compression
+                    return self.upload_image(image, bucket, path, content_type, max_size_mb)
+                except Exception as e:
+                    logger.warning(f"Failed to compress image, uploading as-is: {e}")
+            
             # Upload to Supabase
             response = self.client.storage.from_(bucket).upload(
                 path=path,
@@ -130,7 +219,8 @@ class SupabaseStorageService:
             # Get public URL
             public_url = self.client.storage.from_(bucket).get_public_url(path)
             
-            logger.info(f"Uploaded bytes to {bucket}/{path}")
+            file_size_mb = len(file_data) / (1024 * 1024)
+            logger.info(f"Uploaded bytes to {bucket}/{path} ({file_size_mb:.2f}MB)")
             return public_url
             
         except Exception as e:
