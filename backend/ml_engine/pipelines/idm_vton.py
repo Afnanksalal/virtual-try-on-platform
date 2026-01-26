@@ -132,7 +132,6 @@ class IDMVTONPipeline:
             # Enable CPU offload for low VRAM
             if self.device == "cuda":
                 try:
-                    import torch
                     if torch.cuda.is_available():
                         total_memory = torch.cuda.get_device_properties(0).total_memory
                         # Enable offload if less than 12GB VRAM
