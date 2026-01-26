@@ -89,11 +89,13 @@ from app.api.endpoints import router as api_router
 from app.api.body_generation import router as body_gen_router
 from app.api.image_analysis import router as image_analysis_router
 from app.api.image_composition import router as image_composition_router
+from app.api.garment_management import router as garment_router
 
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(body_gen_router, prefix="/api/v1")
 app.include_router(image_analysis_router, prefix="/api/v1")
 app.include_router(image_composition_router, prefix="/api/v1")
+app.include_router(garment_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

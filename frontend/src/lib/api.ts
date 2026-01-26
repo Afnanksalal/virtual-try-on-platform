@@ -1,3 +1,14 @@
+import { supabase } from './supabase';
+import { withRetry, handleError } from './errorHandling';
+import type { 
+  Garment, 
+  TryOnResult, 
+  Recommendation, 
+  ImageAnalysis, 
+  BodyParameters,
+  StorageObject 
+} from './types';
+
 // Type definitions
 type HealthCheckResponse = {
   status: string;
@@ -46,6 +57,8 @@ type APIConfig = {
 
 // API Configuration
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const DEFAULT_TIMEOUT = 60000; // 60 seconds
+const LONG_TIMEOUT = 180000; // 3 minutes for ML operations
 
 class APIError extends Error {
   constructor(public status: number, message: string) {
@@ -56,15 +69,41 @@ class APIError extends Error {
 
 // Core API client
 const api = {
-  async request<T>(endpoint: string, options: RequestInit = {}, config: APIConfig = {}): Promise<T> {
+  async getAuthHeaders(): Promise<Record<string, string>> {
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        return {
+          'Authorization': `Bearer ${session.access_token}`,
+        };
+      }
+      return {};
+    } catch (error) {
+      console.error('Failed to get auth token:', error);
+      return {};
+    }
+  },
+
+  async request<T>(endpoint: string, options: RequestInit = {}, config: APIConfig = {}): Promise<T> {
+    const timeout = config.timeout || DEFAULT_TIMEOUT;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      // Get auth headers
+      const authHeaders = await this.getAuthHeaders();
+      
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         ...options,
         headers: {
+          ...authHeaders,
           ...config.headers,
           ...options.headers,
         },
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -73,8 +112,12 @@ const api = {
 
       return await response.json();
     } catch (error) {
+      clearTimeout(timeoutId);
       if (error instanceof APIError) throw error;
       if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new APIError(408, 'Request timeout');
+        }
         throw new APIError(500, error.message);
       }
       throw new APIError(500, "Unknown error");
@@ -98,6 +141,10 @@ const api = {
     }
 
     return this.request<T>(endpoint, options, config);
+  },
+
+  delete<T>(endpoint: string, config?: APIConfig): Promise<T> {
+    return this.request<T>(endpoint, { method: "DELETE" }, config);
   },
 };
 
@@ -183,6 +230,318 @@ export const endpoints = {
     formData.append("head_image", headImage);
     formData.append("body_image", bodyImage);
     return api.post("/api/v1/combine-head-body", formData);
+  },
+
+  // Garment Management
+  uploadGarment: async (file: File, userId: string): Promise<Garment> => {
+    return withRetry(
+      async () => {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await api.post<{
+          message: string;
+          garment: {
+            id: string;
+            url: string;
+            name: string;
+            path: string;
+            uploaded_at: string;
+            size_mb: number;
+            content_type: string;
+          };
+        }>(`/api/v1/garments/upload?user_id=${encodeURIComponent(userId)}`, formData, {
+          timeout: LONG_TIMEOUT,
+        });
+
+        return {
+          id: response.garment.id,
+          userId,
+          url: response.garment.url,
+          thumbnailUrl: response.garment.url,
+          name: response.garment.name,
+          uploadedAt: new Date(response.garment.uploaded_at),
+          metadata: {
+            width: 0,
+            height: 0,
+            size: Math.round(response.garment.size_mb * 1024 * 1024),
+            format: response.garment.content_type,
+          },
+        };
+      },
+      'upload garment',
+      { maxAttempts: 2 } // Only retry once for uploads
+    );
+  },
+
+  listGarments: async (userId: string): Promise<Garment[]> => {
+    return withRetry(
+      async () => {
+        const response = await api.get<{
+          garments: Array<{
+            id: string;
+            url: string;
+            name: string;
+            path: string;
+            uploaded_at: string;
+            size_bytes: number;
+          }>;
+          count: number;
+          user_id: string;
+        }>(`/api/v1/garments/list?user_id=${encodeURIComponent(userId)}`);
+
+        return response.garments.map((garment) => ({
+          id: garment.id,
+          userId,
+          url: garment.url,
+          thumbnailUrl: garment.url,
+          name: garment.name,
+          uploadedAt: new Date(garment.uploaded_at),
+          metadata: {
+            width: 0,
+            height: 0,
+            size: garment.size_bytes,
+            format: '',
+          },
+        }));
+      },
+      'list garments'
+    );
+  },
+
+  deleteGarment: async (garmentId: string, userId: string): Promise<void> => {
+    return withRetry(
+      async () => {
+        await api.delete<{
+          message: string;
+          garment_id: string;
+          deleted: boolean;
+        }>(`/api/v1/garments/${encodeURIComponent(garmentId)}?user_id=${encodeURIComponent(userId)}`);
+      },
+      'delete garment',
+      { maxAttempts: 2 }
+    );
+  },
+
+  // Try-On Operations
+  generateTryOn: async (personalImageUrl: string, garmentUrl: string): Promise<TryOnResult> => {
+    return withRetry(
+      async () => {
+        // Fetch images from URLs
+        const [personalResponse, garmentResponse] = await Promise.all([
+          fetch(personalImageUrl),
+          fetch(garmentUrl),
+        ]);
+
+        const [personalBlob, garmentBlob] = await Promise.all([
+          personalResponse.blob(),
+          garmentResponse.blob(),
+        ]);
+
+        const personalFile = new File([personalBlob], 'personal.jpg', { type: personalBlob.type });
+        const garmentFile = new File([garmentBlob], 'garment.jpg', { type: garmentBlob.type });
+
+        const response = await endpoints.processTryOn(personalFile, garmentFile);
+
+        return {
+          id: `tryon-${Date.now()}`,
+          userId: '',
+          personalImageUrl,
+          garmentUrl,
+          resultUrl: response.result_url,
+          createdAt: new Date(),
+          status: 'completed',
+        };
+      },
+      'generate try-on',
+      { maxAttempts: 2 } // ML operations are expensive, limit retries
+    );
+  },
+
+  // Personal Image Management
+  getPersonalImage: async (userId: string): Promise<{
+    url: string;
+    type: 'head-only' | 'full-body';
+    uploadedAt: Date;
+  } | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('photo_url, created_at, updated_at')
+        .eq('id', userId)
+        .single();
+
+      if (error || !data || !data.photo_url) {
+        return null;
+      }
+
+      // For now, we'll assume full-body unless we have metadata
+      // In a real implementation, this would be stored in the profile
+      return {
+        url: data.photo_url,
+        type: 'full-body', // Default assumption
+        uploadedAt: new Date(data.updated_at || data.created_at),
+      };
+    } catch (error) {
+      console.error('Failed to fetch personal image:', error);
+      return null;
+    }
+  },
+
+  updatePersonalImage: async (userId: string, file: File): Promise<{
+    url: string;
+    type: 'head-only' | 'full-body';
+    uploadedAt: Date;
+  }> => {
+    try {
+      // Upload to Supabase storage
+      const fileName = `${userId}/${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('user-uploads')
+        .upload(fileName, file, { cacheControl: '3600', upsert: false });
+
+      if (uploadError) {
+        throw new APIError(500, `Upload failed: ${uploadError.message}`);
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('user-uploads')
+        .getPublicUrl(fileName);
+
+      // Update profile
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          photo_url: publicUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (updateError) {
+        throw new APIError(500, `Profile update failed: ${updateError.message}`);
+      }
+
+      return {
+        url: publicUrl,
+        type: 'full-body', // Default assumption
+        uploadedAt: new Date(),
+      };
+    } catch (error) {
+      if (error instanceof APIError) throw error;
+      throw new APIError(500, error instanceof Error ? error.message : 'Failed to update personal image');
+    }
+  },
+
+  // ========== WARDROBE ENDPOINTS ==========
+
+  getWardrobe: async (userId: string): Promise<Garment[]> => {
+    return withRetry(
+      async () => {
+        const response = await api.get<{
+          items: Array<{
+            id: string;
+            url: string;
+            name: string;
+            path?: string;
+            uploaded_at: string;
+            size_bytes?: number;
+            user_id?: string;
+          }>;
+          count: number;
+        }>(`/api/v1/wardrobe/${encodeURIComponent(userId)}`);
+
+        return response.items.map((item) => ({
+          id: item.id,
+          userId: item.user_id || userId,
+          url: item.url,
+          thumbnailUrl: item.url,
+          name: item.name,
+          uploadedAt: new Date(item.uploaded_at),
+          metadata: {
+            width: 0,
+            height: 0,
+            size: item.size_bytes || 0,
+            format: '',
+          },
+        }));
+      },
+      'get wardrobe'
+    );
+  },
+
+  // ========== TRY-ON HISTORY ENDPOINTS ==========
+
+  getTryOnHistory: async (userId: string, limit: number = 50): Promise<TryOnResult[]> => {
+    return withRetry(
+      async () => {
+        const response = await api.get<{
+          results: Array<{
+            id: string;
+            user_id: string;
+            personal_image_url: string;
+            garment_url: string;
+            result_url: string;
+            status: string;
+            created_at: string;
+            metadata?: any;
+          }>;
+          count: number;
+        }>(`/api/v1/tryon/history/${encodeURIComponent(userId)}?limit=${limit}`);
+
+        return response.results.map((result) => ({
+          id: result.id,
+          userId: result.user_id,
+          personalImageUrl: result.personal_image_url,
+          garmentUrl: result.garment_url,
+          resultUrl: result.result_url,
+          createdAt: new Date(result.created_at),
+          status: (result.status as 'processing' | 'completed' | 'failed') || 'completed',
+        }));
+      },
+      'get try-on history'
+    );
+  },
+};
+
+// Supabase Storage Helpers
+export const supabaseStorage = {
+  uploadToSupabase: async (file: File, bucket: string, path: string): Promise<string> => {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .upload(path, file);
+
+    if (error) {
+      throw new APIError(500, `Upload failed: ${error.message}`);
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(path);
+
+    return publicUrl;
+  },
+
+  deleteFromSupabase: async (bucket: string, path: string): Promise<void> => {
+    const { error } = await supabase.storage
+      .from(bucket)
+      .remove([path]);
+
+    if (error) {
+      throw new APIError(500, `Delete failed: ${error.message}`);
+    }
+  },
+
+  listFromSupabase: async (bucket: string, prefix: string): Promise<StorageObject[]> => {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .list(prefix);
+
+    if (error) {
+      throw new APIError(500, `List failed: ${error.message}`);
+    }
+
+    return data || [];
   },
 };
 

@@ -22,8 +22,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={jakarta.className}>
+        <a href="#main-content" className="skip-to-main">
+          Skip to main content
+        </a>
         <Navbar />
-        <main className="min-h-screen">
+        <main id="main-content" className="min-h-screen">
           {children}
         </main>
         <Toaster position="bottom-right" richColors closeButton />

@@ -11,3 +11,5 @@ data/results/*
 !data/results/.gitkeep
 backend/ml_engine/weights/*
 !backend/ml_engine/weights/.gitkeep
+.kiro
+.vscode

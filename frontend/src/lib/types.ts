@@ -16,6 +16,17 @@ export interface UserProfile {
   style_preference?: string;
   skin_tone?: string;
   created_at?: string;
+  personalImage?: {
+    url: string;
+    type: 'head-only' | 'full-body';
+    uploadedAt: Date;
+  } | null;
+  preferences?: {
+    ethnicity?: string;
+    bodyType?: string;
+    height?: number;
+    weight?: number;
+  };
 }
 
 export interface OnboardResponse {
@@ -30,12 +41,38 @@ export interface OnboardResponse {
 }
 
 // Try-On Types
+export interface TryOnResult {
+  id: string;
+  userId: string;
+  personalImageUrl: string;
+  garmentUrl: string;
+  resultUrl: string;
+  createdAt: Date;
+  status: 'processing' | 'completed' | 'failed';
+}
+
 export interface TryOnResponse {
   result_url: string;
   processing_time: number;
   metadata: {
     model: string;
     resolution: string;
+  };
+}
+
+// Garment Types
+export interface Garment {
+  id: string;
+  userId: string;
+  url: string;
+  thumbnailUrl: string;
+  name: string;
+  uploadedAt: Date;
+  metadata: {
+    width: number;
+    height: number;
+    size: number;
+    format: string;
   };
 }
 
@@ -50,6 +87,18 @@ export interface WardrobeItem {
 }
 
 // Recommendation Types
+export interface Recommendation {
+  id: string;
+  name: string;
+  description: string;
+  imageUrl: string;
+  price: string;
+  currency: string;
+  source: string;
+  productUrl: string;
+  category: string;
+}
+
 export interface RecommendationItem {
   name: string;
   description: string;
@@ -68,6 +117,26 @@ export interface ShopItem {
   category: string;
 }
 
+// Image Analysis Types
+export interface ImageAnalysis {
+  type: 'head-only' | 'full-body';
+  confidence: number;
+  detectedFeatures: {
+    hasFace: boolean;
+    hasFullBody: boolean;
+    bodyParts: string[];
+  };
+}
+
+// Body Parameters Types
+export interface BodyParameters {
+  ethnicity: string;
+  bodyType: 'slim' | 'athletic' | 'average' | 'curvy' | 'plus-size';
+  height: number; // in cm
+  weight: number; // in kg
+  gender: 'male' | 'female' | 'other';
+}
+
 // Body Generation Types
 export interface BodyGenerationOption {
   id: string;
@@ -76,6 +145,16 @@ export interface BodyGenerationOption {
 
 export interface BodyGenerationResponse {
   options: BodyGenerationOption[];
+}
+
+// Supabase Storage Types
+export interface StorageObject {
+  name: string;
+  id: string;
+  updated_at: string;
+  created_at: string;
+  last_accessed_at: string;
+  metadata: Record<string, any>;
 }
 
 // Health Check Types

@@ -16,6 +16,20 @@
   .text-balance {
     text-wrap: balance;
   }
+  
+  /* Loading animation for skeleton loaders */
+  .animate-skeleton {
+    animation: skeleton-loading 1.5s ease-in-out infinite;
+  }
+  
+  @keyframes skeleton-loading {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
 }
 
 :root {
@@ -32,6 +46,40 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+/* Accessibility: Enhanced focus indicators for keyboard navigation */
+*:focus-visible {
+  outline: 2px solid #000;
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #000;
+  outline-offset: 2px;
+}
+
+/* Skip to main content link for screen readers */
+.skip-to-main {
+  position: absolute;
+  left: -9999px;
+  z-index: 999;
+}
+
+.skip-to-main:focus {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  z-index: 999;
+  padding: 0.5rem 1rem;
+  background-color: #000;
+  color: #fff;
+  border-radius: 0.5rem;
+  text-decoration: none;
 }
 
 /* "Creamy" Selection */

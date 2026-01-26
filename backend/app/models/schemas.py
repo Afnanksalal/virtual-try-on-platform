@@ -171,6 +171,31 @@ class ErrorResponse(StrictBaseModel):
     details: Optional[Dict[str, Any]] = None
     request_id: str = Field(..., min_length=1)
 
+# Garment management schemas
+class GarmentMetadata(StrictBaseModel):
+    id: str = Field(..., min_length=1)
+    url: str = Field(..., min_length=1, max_length=2048)
+    name: str = Field(..., min_length=1, max_length=255)
+    path: str = Field(..., min_length=1, max_length=500)
+    uploaded_at: str = Field(..., min_length=1)
+    size_mb: Optional[float] = Field(None, ge=0)
+    size_bytes: Optional[int] = Field(None, ge=0)
+    content_type: Optional[str] = Field(None, max_length=100)
+
+class GarmentUploadResponse(StrictBaseModel):
+    message: str = Field(..., min_length=1)
+    garment: GarmentMetadata
+
+class GarmentListResponse(StrictBaseModel):
+    garments: List[GarmentMetadata]
+    count: int = Field(..., ge=0)
+    user_id: str = Field(..., min_length=1)
+
+class GarmentDeleteResponse(StrictBaseModel):
+    message: str = Field(..., min_length=1)
+    garment_id: str = Field(..., min_length=1)
+    deleted: bool
+
 # Configuration schemas
 class ModelConfig(StrictBaseModel):
     name: str = Field(..., min_length=1, max_length=100)

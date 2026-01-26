@@ -94,6 +94,9 @@ export default function Navbar() {
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="md:hidden p-2 rounded-lg hover:bg-gray-100 transition-colors"
+              aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-menu"
             >
               {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
@@ -103,7 +106,13 @@ export default function Navbar() {
 
       {/* Full Screen Mobile Menu */}
       {mobileMenuOpen && (
-        <div className="fixed inset-0 bg-white z-40 md:hidden">
+        <div 
+          id="mobile-menu" 
+          className="fixed inset-0 bg-white z-40 md:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mobile navigation menu"
+        >
           <div className="h-full flex flex-col">
             {/* Header Spacer */}
             <div className="h-20"></div>

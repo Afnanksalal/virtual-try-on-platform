@@ -1,118 +1,380 @@
 "use client";
-import { useState } from "react";
-import TryOnWidget from "@/components/TryOnWidget";
-import Recommendations from "@/components/Recommendations";
-import { Zap, Download as DownloadIcon, ShoppingBag } from "lucide-react";
-import Image from "next/image";
-import { toast } from "sonner";
+
+import { useState, useEffect } from "react";
+import { endpoints } from "@/lib/api";
+import { handleError, showSuccess, showInfo } from "@/lib/errorHandling";
 import ErrorBoundary from "@/components/ErrorBoundary";
-
 import ProtectedRoute from "@/components/ProtectedRoute";
+import { StudioProvider, useStudio } from "@/contexts/StudioContext";
+import {
+  TabNavigation,
+  PersonalImageTab,
+  GarmentTab,
+  ResultsTab,
+  RecommendationsTab,
+  type TabType,
+} from "@/components/studio";
+import type { Garment, Recommendation } from "@/lib/types";
+import { Sparkles, Zap } from "lucide-react";
 
-export default function StudioPage() {
-  const [result, setResult] = useState<string | null>(null);
-  
-  const handleDownload = () => {
-    if (!result) return;
-    
+function StudioContent() {
+  const {
+    personalImage,
+    garments,
+    tryOnResults,
+    recommendations,
+    selectedGarment,
+    isGenerating,
+    isLoadingRecommendations,
+    hasRequestedRecommendations,
+    isLoadingGarments,
+    isLoadingPersonalImage,
+    userId,
+    addGarment,
+    removeGarment,
+    selectGarment,
+    addTryOnResult,
+    setIsGenerating,
+    setRecommendations,
+    setIsLoadingRecommendations,
+    setHasRequestedRecommendations,
+    setPersonalImage,
+  } = useStudio();
+
+  const [activeTab, setActiveTab] = useState<TabType>('personal');
+
+  // Check for pre-selected garment from Wardrobe
+  useEffect(() => {
+    const preSelectedGarment = sessionStorage.getItem('selectedGarment');
+    if (preSelectedGarment && garments.length > 0) {
+      try {
+        const garment = JSON.parse(preSelectedGarment);
+        const matchingGarment = garments.find(g => g.id === garment.id);
+        if (matchingGarment) {
+          selectGarment(matchingGarment);
+          setActiveTab('garment');
+          showSuccess('Garment loaded from Wardrobe');
+        }
+        sessionStorage.removeItem('selectedGarment');
+      } catch (error) {
+        handleError(error, 'load pre-selected garment', { showToast: false });
+      }
+    }
+  }, [garments, selectGarment]);
+
+  // Tab change handler
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+  };
+
+  // Garment selection handler
+  const handleGarmentSelect = (garment: Garment) => {
+    selectGarment(garment);
+  };
+
+  // Garment upload handler with optimistic update
+  const handleGarmentUpload = async (file: File) => {
+    if (!userId) {
+      handleError(
+        new Error('Not authenticated'),
+        'upload garment',
+        { showToast: true, userId: userId || undefined }
+      );
+      return;
+    }
+
+    // Optimistic update: create temporary garment
+    const tempId = `temp-${Date.now()}`;
+    const tempUrl = URL.createObjectURL(file);
+    const tempGarment: Garment = {
+      id: tempId,
+      userId,
+      url: tempUrl,
+      thumbnailUrl: tempUrl,
+      name: file.name,
+      uploadedAt: new Date(),
+      metadata: {
+        width: 0,
+        height: 0,
+        size: file.size,
+        format: file.type,
+      },
+    };
+
+    // Add optimistically
+    addGarment(tempGarment);
+    showInfo('Uploading garment...');
+
     try {
-      const link = document.createElement('a');
-      link.href = result;
-      link.download = `try-on-result-${Date.now()}.jpg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      toast.success("Image downloaded successfully!");
+      const newGarment = await endpoints.uploadGarment(file, userId);
+      
+      // Remove temp garment and add real one
+      removeGarment(tempId);
+      addGarment(newGarment);
+      
+      showSuccess('Garment uploaded successfully');
+      
+      // Clean up temp URL
+      URL.revokeObjectURL(tempUrl);
     } catch (error) {
-      console.error("Download failed:", error);
-      toast.error("Failed to download image");
+      handleError(error, 'upload garment', { showToast: true, userId });
+      
+      // Remove temp garment on error
+      removeGarment(tempId);
+      URL.revokeObjectURL(tempUrl);
+      throw error;
     }
   };
-  
-  const handleBuyNow = () => {
-    // In production, this would integrate with e-commerce platform
-    // For now, redirect to shop page or show coming soon
-    toast.info("E-commerce integration coming soon!");
+
+  // Generate try-on handler
+  const handleGenerateTryOn = async () => {
+    if (!personalImage || !selectedGarment) {
+      handleError(
+        new Error('Missing required data'),
+        'generate try-on',
+        { showToast: true, userId: userId || undefined }
+      );
+      return;
+    }
+
+    try {
+      setIsGenerating(true);
+      showInfo('Generating try-on result...');
+
+      const result = await endpoints.generateTryOn(
+        personalImage.url,
+        selectedGarment.url
+      );
+
+      addTryOnResult(result);
+      setIsGenerating(false);
+      setActiveTab('results'); // Auto-switch to results tab
+
+      showSuccess('Try-on result generated successfully');
+    } catch (error) {
+      handleError(error, 'generate try-on', { showToast: true, userId: userId || undefined });
+      setIsGenerating(false);
+    }
   };
-  
+
+  // Request recommendations handler
+  const handleRequestRecommendations = async () => {
+    if (!personalImage) {
+      handleError(
+        new Error('No personal image'),
+        'request recommendations',
+        { showToast: true, userId: userId || undefined }
+      );
+      return;
+    }
+
+    try {
+      setIsLoadingRecommendations(true);
+      setHasRequestedRecommendations(true);
+      showInfo('Fetching AI recommendations...');
+
+      // Convert personal image URL to File
+      const response = await fetch(personalImage.url);
+      const blob = await response.blob();
+      const personalImageFile = new File([blob], 'personal.jpg', { type: blob.type });
+
+      const recommendationItems = await endpoints.getRecommendations(personalImageFile);
+
+      // Transform API response to Recommendation type
+      const transformedRecommendations: Recommendation[] = recommendationItems.map((item, index) => ({
+        id: item.id || `rec-${Date.now()}-${index}`,
+        name: item.name,
+        description: item.category || 'Recommended for you',
+        imageUrl: item.image_url,
+        price: item.price.toString(),
+        currency: '$',
+        source: 'eBay',
+        productUrl: item.ebay_url,
+        category: item.category,
+      }));
+
+      setRecommendations(transformedRecommendations);
+      setIsLoadingRecommendations(false);
+      setActiveTab('recommendations'); // Auto-switch to recommendations tab
+
+      showSuccess('Recommendations loaded successfully');
+    } catch (error) {
+      handleError(error, 'fetch recommendations', { showToast: true, userId: userId || undefined });
+      setIsLoadingRecommendations(false);
+    }
+  };
+
+  // Refresh recommendations handler
+  const handleRefreshRecommendations = async () => {
+    await handleRequestRecommendations();
+  };
+
+  // Use recommendation for try-on handler
+  const handleUseRecommendationForTryOn = async (recommendation: Recommendation) => {
+    if (!userId) {
+      handleError(
+        new Error('Not authenticated'),
+        'use recommendation',
+        { showToast: true }
+      );
+      return;
+    }
+
+    try {
+      // Download recommendation image
+      const response = await fetch(recommendation.imageUrl);
+      const blob = await response.blob();
+      const file = new File([blob], `${recommendation.name}.jpg`, { type: blob.type });
+
+      // Upload as garment
+      await handleGarmentUpload(file);
+
+      // Switch to garment tab
+      setActiveTab('garment');
+    } catch (error) {
+      handleError(error, 'use recommendation for try-on', { showToast: true, userId });
+      throw error;
+    }
+  };
+
+  // Personal image upload handler
+  const handlePersonalImageUpload = async (file: File) => {
+    if (!userId) {
+      handleError(
+        new Error('Not authenticated'),
+        'upload personal image',
+        { showToast: true }
+      );
+      return;
+    }
+
+    try {
+      const result = await endpoints.updatePersonalImage(userId, file);
+      setPersonalImage(result);
+      showSuccess('Personal image updated successfully');
+    } catch (error) {
+      handleError(error, 'update personal image', { showToast: true, userId });
+      throw error;
+    }
+  };
+
+  // Check if Generate button should be enabled
+  const canGenerate = selectedGarment !== null && personalImage !== null && !isGenerating;
+
   return (
     <ProtectedRoute>
-    <ErrorBoundary>
-    <div className="min-h-screen pt-28 sm:pt-24 pb-12 px-4 sm:px-6 lg:px-8 bg-gray-50">
-        <div className="max-w-7xl mx-auto">
-            <div className="mb-6 sm:mb-8">
-              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900">Virtual Try-On Studio</h1>
-              <p className="text-sm sm:text-base text-gray-600 mt-2">Upload a garment and see yourself wearing it</p>
-            </div>
-            
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
-            
-            {/* Left Col: Creation */}
-            <div className="lg:col-span-3 space-y-6">
-                <ErrorBoundary>
-                  <TryOnWidget onResult={setResult} />
-                </ErrorBoundary>
+      <ErrorBoundary>
+        <div className="min-h-screen pt-20 sm:pt-24 pb-8 sm:pb-12 px-4 sm:px-6 lg:px-8 bg-gray-50">
+          <div className="max-w-7xl mx-auto">
+            {/* Header */}
+            <div className="mb-4 sm:mb-6 md:mb-8">
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900">
+                Virtual Try-On Studio
+              </h1>
+              <p className="text-sm sm:text-base text-gray-600 mt-1 sm:mt-2">
+                Create professional virtual try-on results with AI
+              </p>
             </div>
 
-            {/* Center Col: Visualization */}
-            <div className="lg:col-span-6">
-                <div className="bg-white rounded-3xl p-2 shadow-xl shadow-gray-200/50 min-h-[600px] flex items-center justify-center relative overflow-hidden">
-                    {result ? (
-                        <div className="relative w-full h-full">
-                            <Image 
-                              src={result} 
-                              alt="Try-On Result" 
-                              fill 
-                              className="object-cover rounded-2xl" 
-                              unoptimized // Since we might use external URLs or blobs
-                            />
-                            <div className="absolute top-4 right-4 flex gap-2 z-10">
-                                <button 
-                                  onClick={handleDownload}
-                                  className="bg-white/90 backdrop-blur text-sm font-medium px-4 py-2 rounded-full shadow-sm hover:bg-white transition-colors flex items-center gap-2"
-                                >
-                                    <DownloadIcon className="h-4 w-4" />
-                                    Download
-                                </button>
-                                <button 
-                                  onClick={handleBuyNow}
-                                  className="bg-black text-white text-sm font-medium px-4 py-2 rounded-full shadow-sm hover:bg-gray-800 transition-colors flex items-center gap-2"
-                                >
-                                    <ShoppingBag className="h-4 w-4" />
-                                    Buy Now
-                                </button>
-                            </div>
-                        </div>
-                    ) : (
-                         <div className="text-center text-gray-400">
-                             <div className="h-24 w-24 bg-gray-100 rounded-full mx-auto mb-4 flex items-center justify-center animate-pulse">
-                                 <Zap className="h-10 w-10 opacity-20" />
-                             </div>
-                             <p>Your creation will appear here</p>
-                         </div>
-                    )}
-                </div>
-                
-                {result && (
-                     <div className="mt-8">
-                         <h3 className="text-lg font-bold mb-4 ml-2">3D View</h3>
-                         {/* In production, we fetch the generated 3D model URL from the backend result metadata */}
-                         {/* <ModelViewer modelUrl={result.model_3d_url} /> */}
-                         <p className="text-gray-500 text-sm italic ml-2">3D reconstruction pending (Requires configured PIFuHD backend).</p>
-                     </div>
+            {/* Action Buttons */}
+            <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row gap-3 sm:gap-4">
+              <button
+                onClick={handleGenerateTryOn}
+                disabled={!canGenerate}
+                className={`
+                  flex items-center justify-center gap-2 px-6 py-3 rounded-full font-medium transition-all min-h-[44px] text-sm sm:text-base
+                  ${canGenerate
+                    ? 'bg-black text-white hover:bg-gray-800 shadow-lg hover:shadow-xl'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }
+                `}
+                aria-label={isGenerating ? 'Generating try-on result, please wait' : 'Generate virtual try-on result'}
+                aria-busy={isGenerating}
+              >
+                <Zap className={`h-4 w-4 sm:h-5 sm:w-5 ${isGenerating ? 'animate-pulse' : ''}`} aria-hidden="true" />
+                {isGenerating ? 'Generating...' : 'Generate Try-On'}
+              </button>
+
+              <button
+                onClick={handleRequestRecommendations}
+                disabled={isLoadingRecommendations || !personalImage}
+                className={`
+                  flex items-center justify-center gap-2 px-6 py-3 rounded-full font-medium transition-all min-h-[44px] text-sm sm:text-base
+                  ${personalImage && !isLoadingRecommendations
+                    ? 'bg-white text-gray-900 border-2 border-gray-900 hover:bg-gray-50'
+                    : 'bg-gray-200 text-gray-500 border-2 border-gray-300 cursor-not-allowed'
+                  }
+                `}
+                aria-label={isLoadingRecommendations ? 'Loading AI recommendations, please wait' : 'Get AI-powered outfit recommendations'}
+                aria-busy={isLoadingRecommendations}
+              >
+                <Sparkles className={`h-4 w-4 sm:h-5 sm:w-5 ${isLoadingRecommendations ? 'animate-spin' : ''}`} aria-hidden="true" />
+                {isLoadingRecommendations ? 'Loading...' : 'Get Recommendations'}
+              </button>
+            </div>
+
+            {/* Screen reader announcements for loading states */}
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+              {isGenerating && 'Generating try-on result, please wait'}
+              {isLoadingRecommendations && 'Loading recommendations, please wait'}
+            </div>
+
+            {/* Tab Interface */}
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+              <TabNavigation
+                activeTab={activeTab}
+                onTabChange={handleTabChange}
+                showRecommendations={hasRequestedRecommendations}
+              />
+
+              {/* Tab Content */}
+              <div className="min-h-[400px] sm:min-h-[500px] md:min-h-[600px]">
+                {activeTab === 'personal' && (
+                  <PersonalImageTab
+                    personalImage={personalImage}
+                    onImageUpload={handlePersonalImageUpload}
+                    isLoading={isLoadingPersonalImage}
+                  />
                 )}
-            </div>
 
-            {/* Right Col: AI Insights */}
-            <div className="lg:col-span-3">
-                <ErrorBoundary>
-                  <Recommendations />
-                </ErrorBoundary>
+                {activeTab === 'garment' && (
+                  <GarmentTab
+                    garments={garments}
+                    selectedGarment={selectedGarment}
+                    onGarmentSelect={handleGarmentSelect}
+                    onGarmentUpload={handleGarmentUpload}
+                    isLoading={isLoadingGarments}
+                  />
+                )}
+
+                {activeTab === 'results' && (
+                  <ResultsTab
+                    results={tryOnResults}
+                    isLoading={false}
+                  />
+                )}
+
+                {activeTab === 'recommendations' && (
+                  <RecommendationsTab
+                    recommendations={recommendations}
+                    onRefresh={handleRefreshRecommendations}
+                    onUseForTryOn={handleUseRecommendationForTryOn}
+                    isLoading={isLoadingRecommendations}
+                  />
+                )}
+              </div>
             </div>
           </div>
         </div>
-    </div>
-    </ErrorBoundary>
+      </ErrorBoundary>
     </ProtectedRoute>
+  );
+}
+
+export default function StudioPage() {
+  return (
+    <StudioProvider>
+      <StudioContent />
+    </StudioProvider>
   );
 }

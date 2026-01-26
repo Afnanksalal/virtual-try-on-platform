@@ -163,9 +163,6 @@ async def process_virtual_tryon(
         
         logger.info(f"Uploaded input images to Supabase: {user_url}, {garment_url}")
         
-        # Import try-on service
-        from app.services.tryon_service import tryon_service
-        
         # Process try-on
         result = tryon_service.process_tryon(
             person_image=user_img,
@@ -179,6 +176,24 @@ async def process_virtual_tryon(
         )
         
         logger.info(f"Try-on processed in {result['processing_time']:.2f}s")
+        
+        # Save result to database for history (if user is authenticated)
+        try:
+            # Try to get user_id from session or local storage
+            # For now, we'll use request_id as a placeholder
+            # TODO: Extract user_id from authentication header
+            db_record = supabase_storage.save_tryon_result_db(
+                user_id=request_id,  # Placeholder - should be actual user_id
+                personal_image_url=user_url,
+                garment_url=garment_url,
+                result_url=result['result_url'],
+                metadata=result.get('metadata', {})
+            )
+            if db_record:
+                logger.info(f"Try-on result saved to database: {db_record.get('id')}")
+        except Exception as e:
+            logger.warning(f"Failed to save try-on result to database: {e}")
+            # Don't fail the request if database save fails
         
         return {
             "message": "Virtual try-on processed successfully",
@@ -216,3 +231,70 @@ async def generate_body_endpoint(
     except Exception as e:
         logger.error(f"Body generation failed: {e}", exc_info=True)
         raise HTTPException(500, f"Body generation failed: {str(e)}")
+
+@router.get("/wardrobe/{user_id}")
+async def get_user_wardrobe(user_id: str):
+    """
+    Get all wardrobe items (garments) for a user.
+    Returns both storage files and database records.
+    """
+    try:
+        logger.info(f"Fetching wardrobe for user: {user_id}")
+        
+        # Get garments from storage
+        storage_garments = supabase_storage.list_garments(user_id)
+        
+        # Get garments from database (if table exists)
+        db_garments = supabase_storage.list_user_garments_db(user_id)
+        
+        # Merge results (prefer database records if they exist)
+        garments_map = {}
+        
+        # Add storage garments first
+        for garment in storage_garments:
+            garments_map[garment['id']] = garment
+        
+        # Override/add database garments
+        for garment in db_garments:
+            garment_id = garment.get('id', '')
+            garments_map[garment_id] = garment
+        
+        # Convert to list
+        all_garments = list(garments_map.values())
+        
+        logger.info(f"Found {len(all_garments)} wardrobe items for user {user_id}")
+        
+        return {
+            "items": all_garments,
+            "count": len(all_garments)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch wardrobe: {e}", exc_info=True)
+        raise HTTPException(500, f"Failed to fetch wardrobe: {str(e)}")
+
+@router.get("/tryon/history/{user_id}")
+async def get_tryon_history(user_id: str, limit: int = 50):
+    """
+    Get try-on history for a user.
+    Returns previous try-on results ordered by most recent first.
+    """
+    try:
+        logger.info(f"Fetching try-on history for user: {user_id}")
+        
+        # Get results from database
+        results = supabase_storage.list_user_results_db(user_id)
+        
+        # Limit results
+        results = results[:limit]
+        
+        logger.info(f"Found {len(results)} try-on results for user {user_id}")
+        
+        return {
+            "results": results,
+            "count": len(results)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch try-on history: {e}", exc_info=True)
+        raise HTTPException(500, f"Failed to fetch history: {str(e)}")

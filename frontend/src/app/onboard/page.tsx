@@ -8,26 +8,55 @@ import { toast } from "sonner";
 import { endpoints } from "@/lib/api";
 import Image from "next/image";
 
-type Step = "info" | "photo" | "body_selection" | "body_generation" | "complete";
+type Step = "welcome" | "upload" | "analyzing" | "parameters" | "generating" | "complete";
+
+interface BodyParameters {
+  ethnicity: string;
+  bodyType: string;
+  height: number;
+  weight: number;
+  gender: string;
+  age: number;
+  name: string;
+}
+
+interface ImageAnalysis {
+  type: "head_only" | "full_body";
+  confidence: number;
+}
+
+interface OnboardingState {
+  currentStep: Step;
+  uploadedImage: File | null;
+  imageAnalysis: ImageAnalysis | null;
+  bodyParameters: BodyParameters | null;
+  generatedBodyUrl: string | null;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
 
 export default function OnboardPage() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>("info");
-  const [formData, setFormData] = useState({
+  
+  // State management
+  const [currentStep, setCurrentStep] = useState<Step>("welcome");
+  const [uploadedImage, setUploadedImage] = useState<File | null>(null);
+  const [imageAnalysis, setImageAnalysis] = useState<ImageAnalysis | null>(null);
+  const [bodyParameters, setBodyParameters] = useState<BodyParameters>({
     name: "",
-    age: "",
+    age: 0,
     gender: "female",
-    height: "",
-    weight: "",
+    height: 0,
+    weight: 0,
     ethnicity: "",
-    file: null as File | null
+    bodyType: ""
   });
+  const [generatedBodyUrl, setGeneratedBodyUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [photoType, setPhotoType] = useState<"head_only" | "full_body" | null>(null);
-  const [generatedBodies, setGeneratedBodies] = useState<Array<{id: string; url: string}>>([]);
-  const [selectedBody, setSelectedBody] = useState<string>("");
-  const [composedImage, setComposedImage] = useState<string>("");
   const [photoPreview, setPhotoPreview] = useState<string>("");
+  const [generatedBodies, setGeneratedBodies] = useState<Array<{id: string; url: string}>>([]);
+  const [selectedBodyType, setSelectedBodyType] = useState<string>("");
+  const [composedImage, setComposedImage] = useState<string>("");
 
   const bodyTypes = [
     { id: "athletic", label: "Athletic", icon: Dumbbell, desc: "Toned & fit" },
@@ -35,6 +64,10 @@ export default function OnboardPage() {
     { id: "muscular", label: "Muscular", icon: Flame, desc: "Strong physique" },
     { id: "average", label: "Average", icon: User, desc: "Medium build" },
   ];
+
+  // Navigation helpers
+  const canGoBack = currentStep !== "welcome" && currentStep !== "analyzing" && currentStep !== "generating" && currentStep !== "complete";
+  const canGoForward = false; // Determined by step validation
 
   // Enforce Auth
   useEffect(() => {
@@ -47,29 +80,92 @@ export default function OnboardPage() {
     checkSession();
   }, [router]);
 
-  const validateInfoStep = () => {
-    if (!formData.name.trim()) {
+  // Load progress from localStorage
+  useEffect(() => {
+    const savedProgress = localStorage.getItem("onboarding_progress");
+    if (savedProgress) {
+      try {
+        const progress = JSON.parse(savedProgress);
+        if (progress.currentStep && progress.currentStep !== "complete") {
+          setCurrentStep(progress.currentStep);
+          if (progress.bodyParameters) {
+            setBodyParameters(progress.bodyParameters);
+          }
+          if (progress.imageAnalysis) {
+            setImageAnalysis(progress.imageAnalysis);
+          }
+          toast.info("Resuming your onboarding progress");
+        }
+      } catch (error) {
+        console.error("Failed to load progress:", error);
+      }
+    }
+  }, []);
+
+  // Save progress to localStorage
+  useEffect(() => {
+    if (currentStep !== "welcome" && currentStep !== "complete") {
+      const progress = {
+        currentStep,
+        bodyParameters,
+        imageAnalysis,
+        timestamp: Date.now()
+      };
+      localStorage.setItem("onboarding_progress", JSON.stringify(progress));
+    }
+  }, [currentStep, bodyParameters, imageAnalysis]);
+
+  // Step navigation
+  const handleNext = () => {
+    const stepOrder: Step[] = ["welcome", "upload", "analyzing", "parameters", "generating", "complete"];
+    const currentIndex = stepOrder.indexOf(currentStep);
+    if (currentIndex < stepOrder.length - 1) {
+      setCurrentStep(stepOrder[currentIndex + 1]);
+    }
+  };
+
+  const handleBack = () => {
+    if (!canGoBack) return;
+    
+    const stepOrder: Step[] = ["welcome", "upload", "analyzing", "parameters", "generating", "complete"];
+    const currentIndex = stepOrder.indexOf(currentStep);
+    
+    // Skip analyzing and generating steps when going back
+    if (currentIndex > 0) {
+      let previousStep = stepOrder[currentIndex - 1];
+      if (previousStep === "analyzing" || previousStep === "generating") {
+        previousStep = stepOrder[currentIndex - 2];
+      }
+      setCurrentStep(previousStep);
+    }
+  };
+
+  // Validation
+  const validateParameters = () => {
+    if (!bodyParameters.name.trim()) {
       toast.error("Name is required");
       return false;
     }
-    const age = parseInt(formData.age);
-    if (isNaN(age) || age < 13 || age > 100) {
+    if (bodyParameters.age < 13 || bodyParameters.age > 100) {
       toast.error("Please enter a valid age (13-100)");
       return false;
     }
-    const height = parseFloat(formData.height);
-    if (isNaN(height) || height < 50 || height < 300) {
+    if (bodyParameters.height < 50 || bodyParameters.height > 300) {
       toast.error("Please enter a valid height in cm");
       return false;
     }
-    const weight = parseFloat(formData.weight);
-    if (isNaN(weight) || weight < 20 || weight > 500) {
+    if (bodyParameters.weight < 20 || bodyParameters.weight > 500) {
       toast.error("Please enter a valid weight in kg");
+      return false;
+    }
+    if (!bodyParameters.bodyType) {
+      toast.error("Please select a body type");
       return false;
     }
     return true;
   };
 
+  // Image upload and analysis
   const handlePhotoUpload = async (file: File) => {
     // Validate file size
     if (file.size > 10 * 1024 * 1024) {
@@ -77,7 +173,7 @@ export default function OnboardPage() {
       return;
     }
 
-    setFormData({ ...formData, file });
+    setUploadedImage(file);
     
     // Create preview
     const reader = new FileReader();
@@ -86,67 +182,77 @@ export default function OnboardPage() {
     };
     reader.readAsDataURL(file);
     
+    // Move to analyzing step
+    setCurrentStep("analyzing");
     setLoading(true);
     
     try {
       // Analyze if head-only or full-body
       const analysis = await endpoints.analyzeImage(file);
-      setPhotoType(analysis.type);
+      setImageAnalysis({
+        type: analysis.type,
+        confidence: analysis.confidence || 0.9
+      });
       
       if (analysis.type === "head_only") {
-        toast.info("Head-only photo detected! Let's generate a body for you.", { duration: 4000 });
-        setTimeout(() => setStep("body_selection"), 1000);
+        toast.info("Head-only photo detected! Let's set up your body parameters.", { duration: 4000 });
+        setCurrentStep("parameters");
       } else {
         toast.success("Full-body photo detected! You're all set.", { duration: 3000 });
+        // Skip parameters step for full-body images
+        await saveProfile();
       }
     } catch (error) {
       console.error("Analysis error:", error);
       toast.error("Failed to analyze image. Please try again.");
       setPhotoPreview("");
-      setFormData({ ...formData, file: null });
+      setUploadedImage(null);
+      setCurrentStep("upload");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleBodyTypeSelect = async (bodyType: string) => {
-    if (!validateInfoStep()) return;
+  // Body generation
+  const handleParametersSubmit = async () => {
+    if (!validateParameters()) return;
     
+    setCurrentStep("generating");
     setLoading(true);
     
     try {
       // Generate body options
       const result = await endpoints.generateBodies({
-        ethnicity: formData.ethnicity || "Mixed",
+        ethnicity: bodyParameters.ethnicity || "Mixed",
         skin_tone: "Medium",
-        body_type: bodyType,
-        height_cm: parseFloat(formData.height),
-        weight_kg: parseFloat(formData.weight),
+        body_type: bodyParameters.bodyType,
+        height_cm: bodyParameters.height,
+        weight_kg: bodyParameters.weight,
       });
       
       setGeneratedBodies(result.images);
-      setStep("body_generation");
       toast.success("Body options generated!");
     } catch (error) {
       console.error("Body generation error:", error);
       toast.error("Failed to generate bodies. Please try again.");
+      setCurrentStep("parameters");
     } finally {
       setLoading(false);
     }
   };
 
   const handleBodySelect = async (bodyUrl: string) => {
-    setSelectedBody(bodyUrl);
+    setGeneratedBodyUrl(bodyUrl);
     setLoading(true);
     
     try {
-      if (!formData.file) return;
+      if (!uploadedImage) return;
       
       // Fetch body image from Supabase URL
       const bodyFile = await fetch(bodyUrl).then(r => r.blob()).then(b => new File([b], "body.png"));
       
       // Combine head + body
-      const result = await endpoints.combineHeadBody(formData.file, bodyFile);
+      const result = await endpoints.combineHeadBody(uploadedImage, bodyFile);
       setComposedImage(result.image_url);
       
       toast.success("Images combined successfully!");
@@ -159,6 +265,7 @@ export default function OnboardPage() {
     }
   };
 
+  // Save profile
   const saveProfile = async (photoUrl?: string) => {
     const {data: { session } } = await supabase.auth.getSession();
     if (!session) {
@@ -194,12 +301,12 @@ export default function OnboardPage() {
         }
       } else {
         // Upload original photo
-        if (!formData.file) throw new Error("No photo");
+        if (!uploadedImage) throw new Error("No photo");
         
-        const fileName = `${session.user.id}/${Date.now()}_${formData.file.name}`;
+        const fileName = `${session.user.id}/${Date.now()}_${uploadedImage.name}`;
         const { error: uploadError } = await supabase.storage
           .from('user-uploads')
-          .upload(fileName, formData.file, { cacheControl: '3600', upsert: false });
+          .upload(fileName, uploadedImage, { cacheControl: '3600', upsert: false });
 
         if (uploadError) throw uploadError;
 
@@ -213,11 +320,11 @@ export default function OnboardPage() {
       const profileData: any = {
         id: session.user.id,
         email: session.user.email,
-        name: formData.name.trim(),
-        age: parseInt(formData.age),
-        gender: formData.gender,
-        height_cm: parseFloat(formData.height),
-        weight_kg: parseFloat(formData.weight),
+        name: bodyParameters.name.trim(),
+        age: bodyParameters.age,
+        gender: bodyParameters.gender,
+        height_cm: bodyParameters.height,
+        weight_kg: bodyParameters.weight,
         updated_at: new Date().toISOString()
       };
 
@@ -225,8 +332,8 @@ export default function OnboardPage() {
       if (publicUrl) {
         profileData.photo_url = publicUrl;
       }
-      if (formData.ethnicity) {
-        profileData.ethnicity = formData.ethnicity;
+      if (bodyParameters.ethnicity) {
+        profileData.ethnicity = bodyParameters.ethnicity;
       }
 
       const { error: profileError } = await supabase
@@ -238,8 +345,9 @@ export default function OnboardPage() {
         throw new Error(`Profile creation failed: ${profileError.message}`);
       }
       
-      localStorage.setItem("user_name", formData.name.trim());
-      setStep("complete");
+      localStorage.setItem("user_name", bodyParameters.name.trim());
+      localStorage.removeItem("onboarding_progress"); // Clear progress
+      setCurrentStep("complete");
       toast.success("Profile created successfully!");
       
       setTimeout(() => router.push("/studio"), 2000);
@@ -247,41 +355,25 @@ export default function OnboardPage() {
       console.error("Error:", error);
       const message = error instanceof Error ? error.message : "Failed to create profile";
       toast.error(message);
-      // Reset to photo step so user can try again
-      setStep("photo");
-      setPhotoType(null);
+      // Reset to upload step so user can try again
+      setCurrentStep("upload");
+      setImageAnalysis(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async () => {
-    if (!validateInfoStep()) return;
-    if (!formData.file) {
-      toast.error("Please upload a photo");
-      return;
-    }
-
-    if (photoType === "head_only") {
-      if (!selectedBody) {
-        toast.error("Please select a body");
-        return;
-      }
-    }
-
-    // Will be saved after body generation flow or directly
-    if (photoType === "full_body") {
-      await saveProfile();
-    } else if (photoType === "head_only" && composedImage) {
-      await saveProfile(composedImage);
-    }
+  const handleComplete = () => {
+    localStorage.removeItem("onboarding_progress");
+    router.push("/studio");
   };
 
   const stepProgress = {
-    info: 25,
-    photo: 50,
-    body_selection: 65,
-    body_generation: 85,
+    welcome: 0,
+    upload: 25,
+    analyzing: 40,
+    parameters: 60,
+    generating: 80,
     complete: 100
   };
 
@@ -301,113 +393,71 @@ export default function OnboardPage() {
               <motion.div
                 className="h-full bg-black"
                 initial={{ width: 0 }}
-                animate={{ width: `${stepProgress[step]}%` }}
+                animate={{ width: `${stepProgress[currentStep]}%` }}
                 transition={{ duration: 0.5 }}
               />
             </div>
-            <p className="text-xs sm:text-sm text-gray-500 mt-2 text-center">{stepProgress[step]}% Complete</p>
+            <p className="text-xs sm:text-sm text-gray-500 mt-2 text-center">{stepProgress[currentStep]}% Complete</p>
           </div>
 
           {/* Main Card */}
           <div className="bg-white rounded-2xl sm:rounded-3xl p-6 sm:p-8 md:p-10 shadow-xl">
             <AnimatePresence mode="wait">
-              {/* Step 1: Info */}
-              {step === "info" && (
+              {/* Welcome Step */}
+              {currentStep === "welcome" && (
                 <motion.div
-                  key="info"
+                  key="welcome"
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -20 }}
                   transition={{ duration: 0.3 }}
                 >
-                  <div className="space-y-5 sm:space-y-6">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
-                        <input
-                          type="text"
-                          placeholder="John Doe"
-                          value={formData.name}
-                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
-                        />
+                  <div className="text-center space-y-6 py-8">
+                    <div className="inline-flex items-center justify-center w-20 h-20 bg-black rounded-full mb-4">
+                      <Sparkles className="h-10 w-10 text-white" />
+                    </div>
+                    <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">Welcome to Virtual Try-On</h2>
+                    <p className="text-gray-600 max-w-2xl mx-auto">
+                      We&apos;ll guide you through a quick setup process to create your profile. 
+                      This will help us provide the best virtual try-on experience tailored to you.
+                    </p>
+                    <div className="space-y-3 text-left max-w-md mx-auto mt-8">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 w-6 h-6 bg-black rounded-full flex items-center justify-center text-white text-sm font-bold">1</div>
+                        <div>
+                          <p className="font-semibold text-gray-900">Upload Your Photo</p>
+                          <p className="text-sm text-gray-600">Head-only or full-body photos work great</p>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Age *</label>
-                        <input
-                          type="number"
-                          placeholder="25"
-                          value={formData.age}
-                          onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
-                        />
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 w-6 h-6 bg-black rounded-full flex items-center justify-center text-white text-sm font-bold">2</div>
+                        <div>
+                          <p className="font-semibold text-gray-900">Set Your Preferences</p>
+                          <p className="text-sm text-gray-600">Tell us about your body type and style</p>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 w-6 h-6 bg-black rounded-full flex items-center justify-center text-white text-sm font-bold">3</div>
+                        <div>
+                          <p className="font-semibold text-gray-900">Start Trying On</p>
+                          <p className="text-sm text-gray-600">Explore outfits and see yourself in new styles</p>
+                        </div>
                       </div>
                     </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Gender *</label>
-                        <select
-                          value={formData.gender}
-                          onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
-                        >
-                          <option value="female">Female</option>
-                          <option value="male">Male</option>
-                          <option value="other">Other</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Height (cm) *</label>
-                        <input
-                          type="number"
-                          placeholder="170"
-                          value={formData.height}
-                          onChange={(e) => setFormData({ ...formData, height: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Weight (kg) *</label>
-                        <input
-                          type="number"
-                          placeholder="65"
-                          value={formData.weight}
-                          onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Ethnicity (optional)</label>
-                      <input
-                        type="text"
-                        placeholder="e.g., Asian, Caucasian, African, Mixed"
-                        value={formData.ethnicity}
-                        onChange={(e) => setFormData({ ...formData, ethnicity: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
-                      />
-                    </div>
-
                     <button
-                      onClick={() => {
-                        if (validateInfoStep()) setStep("photo");
-                      }}
-                      className="w-full bg-black text-white py-3 sm:py-4 rounded-xl font-semibold hover:bg-gray-800 transition-all flex items-center justify-center gap-2 touch-manipulation"
+                      onClick={() => setCurrentStep("upload")}
+                      className="mt-8 bg-black text-white px-8 py-4 rounded-xl font-semibold hover:bg-gray-800 transition-all flex items-center justify-center gap-2 mx-auto touch-manipulation"
                     >
-                      Continue <ArrowRight className="h-5 w-5" />
+                      Get Started <ArrowRight className="h-5 w-5" />
                     </button>
                   </div>
                 </motion.div>
               )}
 
-              {/* Step 2: Photo */}
-              {step === "photo" && (
+              {/* Upload Step */}
+              {currentStep === "upload" && (
                 <motion.div
-                  key="photo"
+                  key="upload"
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -20 }}
@@ -415,12 +465,14 @@ export default function OnboardPage() {
                 >
                   <div className="space-y-6">
                     <div className="flex items-center gap-3 mb-4">
-                      <button
-                        onClick={() => setStep("info")}
-                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                      >
-                        <ChevronLeft className="h-5 w-5" />
-                      </button>
+                      {canGoBack && (
+                        <button
+                          onClick={handleBack}
+                          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                          <ChevronLeft className="h-5 w-5" />
+                        </button>
+                      )}
                       <h3 className="text-xl sm:text-2xl font-semibold">Upload Your Photo</h3>
                     </div>
 
@@ -460,51 +512,43 @@ export default function OnboardPage() {
                             height={600}
                             className="w-full h-auto object-contain"
                           />
-                          {photoType && (
+                          {imageAnalysis && (
                             <div className="absolute top-4 right-4 bg-black/80 text-white px-3 py-1 rounded-full text-sm flex items-center gap-2">
                               <Check className="h-4 w-4" />
-                              {photoType === "head_only" ? "Head-only" : "Full-body"}
+                              {imageAnalysis.type === "head_only" ? "Head-only" : "Full-body"}
                             </div>
                           )}
                         </div>
-                        
-                        {!loading && photoType === "full_body" && (
-                          <button
-                            onClick={handleSubmit}
-                            disabled={loading}
-                            className="w-full bg-black text-white py-3 sm:py-4 rounded-xl font-semibold hover:bg-gray-800 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
-                          >
-                            {loading ? (
-                              <>
-                                <Loader2 className="animate-spin h-5 w-5" />
-                                <span>Creating Profile...</span>
-                              </>
-                            ) : (
-                              <>
-                                <span>Complete Profile</span>
-                                <Sparkles className="h-5 w-5" />
-                              </>
-                            )}
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {loading && (
-                      <div className="flex flex-col items-center justify-center gap-3 py-8">
-                        <Loader2 className="animate-spin h-8 w-8 text-black" />
-                        <p className="text-gray-600 font-medium">Analyzing your photo...</p>
-                        <p className="text-sm text-gray-400">This may take up to 60 seconds</p>
                       </div>
                     )}
                   </div>
                 </motion.div>
               )}
 
-              {/* Step 3: Body Selection */}
-              {step === "body_selection" && (
+              {/* Analyzing Step */}
+              {currentStep === "analyzing" && (
                 <motion.div
-                  key="body_selection"
+                  key="analyzing"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <div className="flex flex-col items-center justify-center gap-4 py-12">
+                    <Loader2 className="animate-spin h-12 w-12 text-black" />
+                    <h3 className="text-xl font-semibold text-gray-900">Analyzing Your Photo</h3>
+                    <p className="text-gray-600 text-center max-w-md">
+                      We&apos;re detecting whether your photo is head-only or full-body to provide the best experience.
+                    </p>
+                    <p className="text-sm text-gray-400">This may take up to 60 seconds</p>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Parameters Step */}
+              {currentStep === "parameters" && (
+                <motion.div
+                  key="parameters"
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -20 }}
@@ -512,103 +556,233 @@ export default function OnboardPage() {
                 >
                   <div className="space-y-6">
                     <div className="flex items-center gap-3 mb-4">
-                      <button
-                        onClick={() => setStep("photo")}
-                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                      >
-                        <ChevronLeft className="h-5 w-5" />
-                      </button>
-                      <h3 className="text-xl sm:text-2xl font-semibold">Choose Your Body Type</h3>
-                    </div>
-
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                      {bodyTypes.map((type) => {
-                        const IconComponent = type.icon;
-                        return (
-                          <button
-                            key={type.id}
-                            onClick={() => handleBodyTypeSelect(type.id)}
-                            disabled={loading}
-                            className="p-4 sm:p-6 border-2 border-gray-200 rounded-xl hover:border-black hover:bg-gray-50 transition-all disabled:opacity-50 flex flex-col items-center gap-2 sm:gap-3 touch-manipulation"
-                          >
-                            <IconComponent className="h-8 w-8 sm:h-10 sm:w-10 text-gray-700" />
-                            <div className="text-center">
-                              <p className="font-semibold text-sm sm:text-base">{type.label}</p>
-                              <p className="text-xs text-gray-500 mt-1">{type.desc}</p>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {loading && (
-                      <div className="flex flex-col items-center justify-center gap-3 py-8">
-                        <Loader2 className="animate-spin h-8 w-8 text-black" />
-                        <p className="text-gray-600 font-medium">Generating body options...</p>
-                        <p className="text-sm text-gray-400">This may take a few moments</p>
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-
-              {/* Step 4: Body Generation */}
-              {step === "body_generation" && (
-                <motion.div
-                  key="body_generation"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.3 }}
-                >
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <button
-                        onClick={() => setStep("body_selection")}
-                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                        disabled={loading}
-                      >
-                        <ChevronLeft className="h-5 w-5" />
-                      </button>
-                      <h3 className="text-xl sm:text-2xl font-semibold">Select Your Preferred Body</h3>
-                    </div>
-
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                      {generatedBodies.map((body) => (
+                      {canGoBack && (
                         <button
-                          key={body.id}
-                          onClick={() => handleBodySelect(body.url)}
-                          disabled={loading}
-                          className="aspect-[3/4] border-2 border-gray-200 rounded-xl hover:border-black transition-all disabled:opacity-50 overflow-hidden relative group"
+                          onClick={handleBack}
+                          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                         >
-                          <Image
-                            src={body.url}
-                            alt={`Body ${body.id}`}
-                            fill
-                            className="object-cover group-hover:scale-105 transition-transform duration-300"
-                          />
-                          {selectedBody === body.url && (
-                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                              <Check className="h-12 w-12 text-white" />
-                            </div>
-                          )}
+                          <ChevronLeft className="h-5 w-5" />
                         </button>
-                      ))}
+                      )}
+                      <h3 className="text-xl sm:text-2xl font-semibold">Set Your Body Parameters</h3>
                     </div>
 
-                    {loading && (
-                      <div className="flex flex-col items-center justify-center gap-3 py-8">
-                        <Loader2 className="animate-spin h-8 w-8 text-black" />
-                        <p className="text-gray-600 font-medium">Combining images...</p>
-                        <p className="text-sm text-gray-400">Creating your perfect profile photo</p>
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+                      <p className="text-sm text-blue-900">
+                        <strong>Head-only photo detected!</strong> We&apos;ll generate a body model based on your preferences.
+                      </p>
+                    </div>
+
+                    <div className="space-y-5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
+                          <input
+                            type="text"
+                            placeholder="John Doe"
+                            value={bodyParameters.name}
+                            onChange={(e) => setBodyParameters({ 
+                              ...bodyParameters, 
+                              name: e.target.value 
+                            })}
+                            className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Age *</label>
+                          <input
+                            type="number"
+                            placeholder="25"
+                            value={bodyParameters.age || ""}
+                            onChange={(e) => setBodyParameters({ 
+                              ...bodyParameters, 
+                              age: parseInt(e.target.value) || 0 
+                            })}
+                            className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
+                          />
+                        </div>
                       </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Gender *</label>
+                          <select
+                            value={bodyParameters.gender}
+                            onChange={(e) => setBodyParameters({ 
+                              ...bodyParameters, 
+                              gender: e.target.value 
+                            })}
+                            className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
+                          >
+                            <option value="female">Female</option>
+                            <option value="male">Male</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Height (cm) *</label>
+                          <input
+                            type="number"
+                            placeholder="170"
+                            value={bodyParameters.height || ""}
+                            onChange={(e) => setBodyParameters({ 
+                              ...bodyParameters, 
+                              height: parseFloat(e.target.value) || 0 
+                            })}
+                            className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Weight (kg) *</label>
+                          <input
+                            type="number"
+                            placeholder="65"
+                            value={bodyParameters.weight || ""}
+                            onChange={(e) => setBodyParameters({ 
+                              ...bodyParameters, 
+                              weight: parseFloat(e.target.value) || 0 
+                            })}
+                            className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Ethnicity (optional)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g., Asian, Caucasian, African, Mixed"
+                          value={bodyParameters.ethnicity}
+                          onChange={(e) => setBodyParameters({ 
+                            ...bodyParameters, 
+                            ethnicity: e.target.value 
+                          })}
+                          className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:border-transparent transition-all"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-3">Body Type *</label>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                          {bodyTypes.map((type) => {
+                            const IconComponent = type.icon;
+                            const isSelected = bodyParameters.bodyType === type.id;
+                            return (
+                              <button
+                                key={type.id}
+                                onClick={() => setBodyParameters({ 
+                                  ...bodyParameters, 
+                                  bodyType: type.id 
+                                })}
+                                className={`p-4 border-2 rounded-xl transition-all flex flex-col items-center gap-2 ${
+                                  isSelected 
+                                    ? 'border-black bg-gray-50' 
+                                    : 'border-gray-200 hover:border-gray-400'
+                                }`}
+                              >
+                                <IconComponent className="h-8 w-8 text-gray-700" />
+                                <div className="text-center">
+                                  <p className="font-semibold text-sm">{type.label}</p>
+                                  <p className="text-xs text-gray-500">{type.desc}</p>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleParametersSubmit}
+                        disabled={loading || !bodyParameters.bodyType}
+                        className="w-full bg-black text-white py-3 sm:py-4 rounded-xl font-semibold hover:bg-gray-800 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                      >
+                        Generate Body Options <ArrowRight className="h-5 w-5" />
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Generating Step */}
+              {currentStep === "generating" && (
+                <motion.div
+                  key="generating"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <div className="space-y-6">
+                    {generatedBodies.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-4 py-12">
+                        <Loader2 className="animate-spin h-12 w-12 text-black" />
+                        <h3 className="text-xl font-semibold text-gray-900">Generating Body Models</h3>
+                        <p className="text-gray-600 text-center max-w-md">
+                          Creating personalized body options based on your parameters. This may take a few moments.
+                        </p>
+                        <div className="w-full max-w-xs bg-gray-200 rounded-full h-2 mt-4">
+                          <motion.div
+                            className="bg-black h-2 rounded-full"
+                            initial={{ width: "0%" }}
+                            animate={{ width: "100%" }}
+                            transition={{ duration: 10, ease: "linear" }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-3 mb-4">
+                          {canGoBack && !loading && (
+                            <button
+                              onClick={handleBack}
+                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                              <ChevronLeft className="h-5 w-5" />
+                            </button>
+                          )}
+                          <h3 className="text-xl sm:text-2xl font-semibold">Select Your Preferred Body</h3>
+                        </div>
+
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                          {generatedBodies.map((body) => (
+                            <button
+                              key={body.id}
+                              onClick={() => handleBodySelect(body.url)}
+                              disabled={loading}
+                              className="aspect-[3/4] border-2 border-gray-200 rounded-xl hover:border-black transition-all disabled:opacity-50 overflow-hidden relative group"
+                            >
+                              <Image
+                                src={body.url}
+                                alt={`Body ${body.id}`}
+                                fill
+                                className="object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
+                              {generatedBodyUrl === body.url && (
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                  <Check className="h-12 w-12 text-white" />
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+
+                        {loading && (
+                          <div className="flex flex-col items-center justify-center gap-3 py-8">
+                            <Loader2 className="animate-spin h-8 w-8 text-black" />
+                            <p className="text-gray-600 font-medium">Combining images...</p>
+                            <p className="text-sm text-gray-400">Creating your perfect profile photo</p>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </motion.div>
               )}
 
-              {/* Step 5: Complete */}
-              {step === "complete" && (
+              {/* Complete Step */}
+              {currentStep === "complete" && (
                 <motion.div
                   key="complete"
                   initial={{ opacity: 0, scale: 0.9 }}

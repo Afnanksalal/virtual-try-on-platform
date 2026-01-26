@@ -5,10 +5,20 @@ NO local file storage allowed.
 
 import os
 import io
-from typing import Optional, BinaryIO
+import uuid
+from datetime import datetime
+from typing import Optional, BinaryIO, List, Dict, Any
 from PIL import Image
+from fastapi import UploadFile
 from supabase import create_client, Client
 from ..core.logging_config import get_logger
+from ..core.exceptions import (
+    StorageErrorException,
+    SupabaseUnavailableException,
+    FileTooLargeException,
+    InvalidMimeTypeException
+)
+from ..core.file_validator import FileValidator
 
 logger = get_logger("services.supabase_storage")
 
@@ -35,6 +45,11 @@ class SupabaseStorageService:
         self.RESULTS_BUCKET = "results"
         self.GENERATED_BUCKET = "generated"
         self.WARDROBE_BUCKET = "wardrobe"
+        self.USER_GARMENTS_BUCKET = "user-garments"
+        self.USER_IMAGES_BUCKET = "user-images"
+        
+        # Initialize file validator
+        self.file_validator = FileValidator(max_size_mb=10)
     
     def upload_image(
         self,
@@ -227,6 +242,484 @@ class SupabaseStorageService:
             Public URL
         """
         return self.client.storage.from_(bucket).get_public_url(path)
+    
+    def _generate_unique_filename(self, original_filename: str) -> str:
+        """
+        Generate unique filename to prevent collisions.
+        
+        Args:
+            original_filename: Original filename with extension
+            
+        Returns:
+            Unique filename with UUID prefix
+        """
+        # Extract extension
+        name_parts = original_filename.rsplit('.', 1)
+        if len(name_parts) == 2:
+            name, ext = name_parts
+            ext = ext.lower()
+        else:
+            name = original_filename
+            ext = 'jpg'
+        
+        # Generate unique ID
+        unique_id = str(uuid.uuid4())
+        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        
+        # Create unique filename: {uuid}_{timestamp}.{ext}
+        unique_filename = f"{unique_id}_{timestamp}.{ext}"
+        
+        return unique_filename
+    
+    async def upload_garment(
+        self,
+        user_id: str,
+        file: UploadFile
+    ) -> Dict[str, Any]:
+        """
+        Upload garment image to user-specific storage.
+        
+        Validates file before upload and stores in user-garments/{userId}/garments/
+        
+        Args:
+            user_id: User ID for storage isolation
+            file: FastAPI UploadFile object
+            
+        Returns:
+            Dictionary with garment metadata including:
+            - id: Unique garment ID
+            - url: Public URL
+            - name: Original filename
+            - path: Storage path
+            - uploaded_at: Upload timestamp
+            
+        Raises:
+            FileTooLargeException: If file exceeds size limit
+            InvalidMimeTypeException: If file type not allowed
+            StorageErrorException: If upload fails
+        """
+        try:
+            # Validate file
+            validation_result = await self.file_validator.validate_file(file)
+            
+            if not validation_result.valid:
+                raise StorageErrorException(
+                    operation="upload_garment",
+                    reason=validation_result.error_message or "Validation failed"
+                )
+            
+            # Generate unique filename
+            unique_filename = self._generate_unique_filename(
+                validation_result.sanitized_filename or file.filename or "garment.jpg"
+            )
+            
+            # Construct storage path: user-garments/{userId}/garments/{unique_filename}
+            storage_path = f"{user_id}/garments/{unique_filename}"
+            
+            # Read file content
+            file_content = await file.read()
+            await file.seek(0)  # Reset for potential reuse
+            
+            # Upload to Supabase
+            response = self.client.storage.from_(self.USER_GARMENTS_BUCKET).upload(
+                path=storage_path,
+                file=file_content,
+                file_options={
+                    "content-type": file.content_type,
+                    "upsert": False  # Don't overwrite existing files
+                }
+            )
+            
+            # Get public URL
+            public_url = self.client.storage.from_(self.USER_GARMENTS_BUCKET).get_public_url(storage_path)
+            
+            # Extract garment ID from unique filename (UUID part)
+            garment_id = unique_filename.split('_')[0]
+            
+            metadata = {
+                "id": garment_id,
+                "url": public_url,
+                "name": validation_result.sanitized_filename or file.filename,
+                "path": storage_path,
+                "uploaded_at": datetime.utcnow().isoformat(),
+                "size_mb": validation_result.file_size_mb,
+                "content_type": file.content_type
+            }
+            
+            logger.info(f"Uploaded garment for user {user_id}: {garment_id}")
+            return metadata
+            
+        except (FileTooLargeException, InvalidMimeTypeException):
+            raise
+        except Exception as e:
+            logger.error(f"Failed to upload garment for user {user_id}: {e}", exc_info=True)
+            raise StorageErrorException(
+                operation="upload_garment",
+                reason=str(e)
+            )
+    
+    def list_garments(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        List all garments for a specific user.
+        
+        Args:
+            user_id: User ID for storage isolation
+            
+        Returns:
+            List of garment metadata dictionaries
+            
+        Raises:
+            SupabaseUnavailableException: If Supabase is unavailable
+            StorageErrorException: If listing fails
+        """
+        try:
+            # List files in user's garment directory
+            garments_path = f"{user_id}/garments"
+            
+            files = self.client.storage.from_(self.USER_GARMENTS_BUCKET).list(garments_path)
+            
+            garments = []
+            for file_obj in files:
+                # Skip directories
+                if file_obj.get('id') is None:
+                    continue
+                
+                file_name = file_obj.get('name', '')
+                file_path = f"{garments_path}/{file_name}"
+                
+                # Extract garment ID from filename (UUID part)
+                garment_id = file_name.split('_')[0] if '_' in file_name else file_name.split('.')[0]
+                
+                # Get public URL
+                public_url = self.client.storage.from_(self.USER_GARMENTS_BUCKET).get_public_url(file_path)
+                
+                metadata = {
+                    "id": garment_id,
+                    "url": public_url,
+                    "name": file_name,
+                    "path": file_path,
+                    "uploaded_at": file_obj.get('created_at', ''),
+                    "size_bytes": file_obj.get('metadata', {}).get('size', 0)
+                }
+                
+                garments.append(metadata)
+            
+            logger.info(f"Listed {len(garments)} garments for user {user_id}")
+            return garments
+            
+        except Exception as e:
+            logger.error(f"Failed to list garments for user {user_id}: {e}", exc_info=True)
+            
+            # Check if it's a connection error
+            if "connection" in str(e).lower() or "timeout" in str(e).lower():
+                raise SupabaseUnavailableException(
+                    details={"user_id": user_id, "error": str(e)}
+                )
+            
+            raise StorageErrorException(
+                operation="list_garments",
+                reason=str(e),
+                details={"user_id": user_id}
+            )
+    
+    def delete_garment(self, user_id: str, garment_id: str) -> bool:
+        """
+        Delete a specific garment for a user.
+        
+        Finds the garment by ID and removes it from storage.
+        
+        Args:
+            user_id: User ID for storage isolation
+            garment_id: Garment ID (UUID from filename)
+            
+        Returns:
+            True if deletion successful, False otherwise
+            
+        Raises:
+            StorageErrorException: If deletion fails
+        """
+        try:
+            # List garments to find the one with matching ID
+            garments = self.list_garments(user_id)
+            
+            # Find garment with matching ID
+            garment_to_delete = None
+            for garment in garments:
+                if garment['id'] == garment_id:
+                    garment_to_delete = garment
+                    break
+            
+            if not garment_to_delete:
+                logger.warning(f"Garment {garment_id} not found for user {user_id}")
+                return False
+            
+            # Delete from Supabase
+            file_path = garment_to_delete['path']
+            response = self.client.storage.from_(self.USER_GARMENTS_BUCKET).remove([file_path])
+            
+            logger.info(f"Deleted garment {garment_id} for user {user_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to delete garment {garment_id} for user {user_id}: {e}", exc_info=True)
+            raise StorageErrorException(
+                operation="delete_garment",
+                reason=str(e),
+                details={"user_id": user_id, "garment_id": garment_id}
+            )
+    
+    async def upload_personal_image(
+        self,
+        user_id: str,
+        file: UploadFile,
+        image_type: str = "profile"
+    ) -> Dict[str, Any]:
+        """
+        Upload user's personal image (profile photo).
+        
+        Validates file before upload and stores in user-images/{userId}/personal/
+        
+        Args:
+            user_id: User ID for storage isolation
+            file: FastAPI UploadFile object
+            image_type: Type of image (profile, full-body, etc.)
+            
+        Returns:
+            Dictionary with image metadata including:
+            - url: Public URL
+            - path: Storage path
+            - uploaded_at: Upload timestamp
+            
+        Raises:
+            FileTooLargeException: If file exceeds size limit
+            InvalidMimeTypeException: If file type not allowed
+            StorageErrorException: If upload fails
+        """
+        try:
+            # Validate file
+            validation_result = await self.file_validator.validate_file(file)
+            
+            if not validation_result.valid:
+                raise StorageErrorException(
+                    operation="upload_personal_image",
+                    reason=validation_result.error_message or "Validation failed"
+                )
+            
+            # Construct storage path: user-images/{userId}/personal/{image_type}.{ext}
+            ext = validation_result.sanitized_filename.rsplit('.', 1)[-1] if '.' in validation_result.sanitized_filename else 'jpg'
+            storage_path = f"{user_id}/personal/{image_type}.{ext}"
+            
+            # Read file content
+            file_content = await file.read()
+            await file.seek(0)
+            
+            # Upload to Supabase (upsert to allow updates)
+            response = self.client.storage.from_(self.USER_IMAGES_BUCKET).upload(
+                path=storage_path,
+                file=file_content,
+                file_options={
+                    "content-type": file.content_type,
+                    "upsert": True  # Allow overwriting existing personal image
+                }
+            )
+            
+            # Get public URL
+            public_url = self.client.storage.from_(self.USER_IMAGES_BUCKET).get_public_url(storage_path)
+            
+            metadata = {
+                "url": public_url,
+                "path": storage_path,
+                "uploaded_at": datetime.utcnow().isoformat(),
+                "size_mb": validation_result.file_size_mb,
+                "content_type": file.content_type,
+                "image_type": image_type
+            }
+            
+            logger.info(f"Uploaded personal image for user {user_id}: {image_type}")
+            return metadata
+            
+        except (FileTooLargeException, InvalidMimeTypeException):
+            raise
+        except Exception as e:
+            logger.error(f"Failed to upload personal image for user {user_id}: {e}", exc_info=True)
+            raise StorageErrorException(
+                operation="upload_personal_image",
+                reason=str(e)
+            )
+    
+    def get_personal_image(self, user_id: str, image_type: str = "profile") -> Optional[str]:
+        """
+        Get user's personal image URL.
+        
+        Args:
+            user_id: User ID for storage isolation
+            image_type: Type of image (profile, full-body, etc.)
+            
+        Returns:
+            Public URL if image exists, None otherwise
+        """
+        try:
+            # Try common image extensions
+            for ext in ['jpg', 'jpeg', 'png', 'webp']:
+                storage_path = f"{user_id}/personal/{image_type}.{ext}"
+                
+                # Check if file exists by trying to list it
+                try:
+                    files = self.client.storage.from_(self.USER_IMAGES_BUCKET).list(f"{user_id}/personal")
+                    
+                    # Check if our file exists in the list
+                    file_name = f"{image_type}.{ext}"
+                    if any(f.get('name') == file_name for f in files):
+                        public_url = self.client.storage.from_(self.USER_IMAGES_BUCKET).get_public_url(storage_path)
+                        logger.info(f"Found personal image for user {user_id}: {image_type}")
+                        return public_url
+                except:
+                    continue
+            
+            logger.info(f"No personal image found for user {user_id}: {image_type}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to get personal image for user {user_id}: {e}", exc_info=True)
+            return None
+    
+    # ========== DATABASE OPERATIONS ==========
+    
+    def list_user_garments_db(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        List all garments for a user from Supabase database table.
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            List of garment records from database
+        """
+        try:
+            logger.info(f"Fetching garments from database for user: {user_id}")
+            
+            # Query garments table
+            response = self.client.table('garments').select('*').eq('user_id', user_id).order('created_at', desc=True).execute()
+            
+            garments = response.data if response.data else []
+            logger.info(f"Found {len(garments)} garments in database for user {user_id}")
+            
+            return garments
+            
+        except Exception as e:
+            logger.error(f"Failed to list user garments from database: {e}", exc_info=True)
+            # Return empty list instead of raising to allow graceful degradation
+            return []
+    
+    def list_user_results_db(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        List all try-on results for a user from Supabase database table.
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            List of try-on result records from database
+        """
+        try:
+            logger.info(f"Fetching try-on results from database for user: {user_id}")
+            
+            # Query tryon_results table
+            response = self.client.table('tryon_results').select('*').eq('user_id', user_id).order('created_at', desc=True).execute()
+            
+            results = response.data if response.data else []
+            logger.info(f"Found {len(results)} try-on results in database for user {user_id}")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Failed to list user results from database: {e}", exc_info=True)
+            # Return empty list instead of raising to allow graceful degradation
+            return []
+    
+    def save_garment_record_db(self, user_id: str, url: str, name: str, metadata: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
+        """
+        Save garment record to Supabase database table.
+        
+        Args:
+            user_id: User ID
+            url: Public URL to garment image
+            name: Garment name
+            metadata: Optional metadata
+            
+        Returns:
+            Created garment record or None if failed
+        """
+        try:
+            logger.info(f"Saving garment record to database for user: {user_id}")
+            
+            garment_data = {
+                'user_id': user_id,
+                'url': url,
+                'name': name,
+                'metadata': metadata or {},
+                'created_at': datetime.utcnow().isoformat()
+            }
+            
+            response = self.client.table('garments').insert(garment_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(f"Garment record saved to database: {response.data[0].get('id')}")
+                return response.data[0]
+            else:
+                logger.warning("Failed to save garment record to database")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to save garment record to database: {e}", exc_info=True)
+            return None
+    
+    def save_tryon_result_db(
+        self, 
+        user_id: str, 
+        personal_image_url: str, 
+        garment_url: str, 
+        result_url: str, 
+        metadata: Optional[Dict] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Save try-on result to Supabase database table.
+        
+        Args:
+            user_id: User ID
+            personal_image_url: URL to personal image
+            garment_url: URL to garment image
+            result_url: URL to result image
+            metadata: Optional metadata
+            
+        Returns:
+            Created result record or None if failed
+        """
+        try:
+            logger.info(f"Saving try-on result to database for user: {user_id}")
+            
+            result_data = {
+                'user_id': user_id,
+                'personal_image_url': personal_image_url,
+                'garment_url': garment_url,
+                'result_url': result_url,
+                'status': 'completed',
+                'metadata': metadata or {},
+                'created_at': datetime.utcnow().isoformat()
+            }
+            
+            response = self.client.table('tryon_results').insert(result_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(f"Try-on result saved to database: {response.data[0].get('id')}")
+                return response.data[0]
+            else:
+                logger.warning("Failed to save try-on result to database")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to save try-on result to database: {e}", exc_info=True)
+            return None
 
 
 # Singleton instance
