@@ -327,12 +327,12 @@ export default function OnboardPage() {
       // Create profile - use upsert to handle existing profiles
       const profileData: any = {
         id: session.user.id,
-        email: session.user.email,
         name: bodyParameters.name.trim(),
         age: bodyParameters.age,
         gender: bodyParameters.gender,
         height_cm: bodyParameters.height,
         weight_kg: bodyParameters.weight,
+        is_full_body: imageAnalysis?.type === "full_body",
         updated_at: new Date().toISOString()
       };
 
@@ -342,6 +342,9 @@ export default function OnboardPage() {
       }
       if (bodyParameters.ethnicity) {
         profileData.ethnicity = bodyParameters.ethnicity;
+      }
+      if (bodyParameters.bodyType) {
+        profileData.body_type = bodyParameters.bodyType;
       }
 
       const { error: profileError } = await supabase
@@ -727,7 +730,11 @@ export default function OnboardPage() {
                         disabled={loading || (imageAnalysis?.type === "head_only" && !bodyParameters.bodyType)}
                         className="w-full bg-black text-white py-3 sm:py-4 rounded-xl font-semibold hover:bg-gray-800 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
                       >
-                        Generate Body Options <ArrowRight className="h-5 w-5" />
+                        {imageAnalysis?.type === "head_only" ? (
+                          <>Generate Body Options <ArrowRight className="h-5 w-5" /></>
+                        ) : (
+                          <>Complete Profile <ArrowRight className="h-5 w-5" /></>
+                        )}
                       </button>
                     </div>
                   </div>
