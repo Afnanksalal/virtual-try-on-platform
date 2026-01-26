@@ -69,6 +69,8 @@ interface PersistedState {
   version: number;
   selectedGarmentId: string | null;
   hasRequestedRecommendations: boolean;
+  tryOnResults: TryOnResult[];
+  recommendations: Recommendation[];
   timestamp: number;
 }
 
@@ -143,11 +145,11 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     if (state.userId) {
       const timeoutId = setTimeout(() => {
         savePersistedState();
-      }, 1000); // Debounce saves
+      }, 500); // Reduced debounce for faster saves
 
       return () => clearTimeout(timeoutId);
     }
-  }, [state.selectedGarment, state.hasRequestedRecommendations, state.userId]);
+  }, [state.selectedGarment, state.hasRequestedRecommendations, state.userId, state.tryOnResults, state.recommendations]);
 
   // Cross-tab synchronization for garment changes
   const GARMENT_SYNC_KEY = 'studio_garments_sync';
@@ -200,6 +202,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       setState(prev => ({
         ...prev,
         hasRequestedRecommendations: parsed.hasRequestedRecommendations,
+        tryOnResults: parsed.tryOnResults || [],
+        recommendations: parsed.recommendations || [],
       }));
 
       // Selected garment will be restored after garments are loaded
@@ -221,6 +225,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
         version: STATE_VERSION,
         selectedGarmentId: state.selectedGarment?.id || null,
         hasRequestedRecommendations: state.hasRequestedRecommendations,
+        tryOnResults: state.tryOnResults,
+        recommendations: state.recommendations,
         timestamp: Date.now(),
       };
 

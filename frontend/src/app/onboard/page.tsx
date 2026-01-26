@@ -198,9 +198,9 @@ export default function OnboardPage() {
         toast.info("Head-only photo detected! Let's set up your body parameters.", { duration: 4000 });
         setCurrentStep("parameters");
       } else {
-        toast.success("Full-body photo detected! You're all set.", { duration: 3000 });
-        // Skip parameters step for full-body images
-        await saveProfile();
+        toast.success("Full-body photo detected! Let's collect some basic info.", { duration: 3000 });
+        // Still need basic parameters even for full-body images
+        setCurrentStep("parameters");
       }
     } catch (error) {
       console.error("Analysis error:", error);

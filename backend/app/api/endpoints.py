@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 from app.services.recommendation import recommendation_engine
 from app.services.supabase_storage import supabase_storage
+from app.services.tryon_service import tryon_service
 from app.core.logging_config import get_logger
 from app.core.file_validator import FileValidator
 
@@ -16,14 +17,6 @@ router = APIRouter()
 
 # Initialize file validator
 file_validator = FileValidator(max_size_mb=10)
-
-@router.get("/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "service": "ml-api",
-        "endpoints": ["health", "recommend", "process-tryon", "generate-body", "analyze-image", "combine-head-body", "results"]
-    }
 
 @router.get("/results/{filename}")
 async def get_result_image(filename: str):
