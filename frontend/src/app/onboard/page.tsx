@@ -158,7 +158,8 @@ export default function OnboardPage() {
       toast.error("Please enter a valid weight in kg");
       return false;
     }
-    if (!bodyParameters.bodyType) {
+    // Body type only required for head-only photos
+    if (imageAnalysis?.type === "head_only" && !bodyParameters.bodyType) {
       toast.error("Please select a body type");
       return false;
     }
@@ -213,10 +214,17 @@ export default function OnboardPage() {
     }
   };
 
-  // Body generation
+  // Body generation or profile save
   const handleParametersSubmit = async () => {
     if (!validateParameters()) return;
     
+    // If full-body photo, skip body generation and save directly
+    if (imageAnalysis?.type === "full_body") {
+      await saveProfile();
+      return;
+    }
+    
+    // If head-only photo, generate body options
     setCurrentStep("generating");
     setLoading(true);
     
@@ -567,11 +575,29 @@ export default function OnboardPage() {
                       <h3 className="text-xl sm:text-2xl font-semibold">Set Your Body Parameters</h3>
                     </div>
 
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-                      <p className="text-sm text-blue-900">
-                        <strong>Head-only photo detected!</strong> We&apos;ll generate a body model based on your preferences.
-                      </p>
-                    </div>
+                    {imageAnalysis && (
+                      <div className={`border rounded-xl p-4 mb-6 ${
+                        imageAnalysis.type === "head_only" 
+                          ? "bg-blue-50 border-blue-200" 
+                          : "bg-green-50 border-green-200"
+                      }`}>
+                        <p className={`text-sm ${
+                          imageAnalysis.type === "head_only" 
+                            ? "text-blue-900" 
+                            : "text-green-900"
+                        }`}>
+                          {imageAnalysis.type === "head_only" ? (
+                            <>
+                              <strong>Head-only photo detected!</strong> We&apos;ll generate a body model based on your preferences.
+                            </>
+                          ) : (
+                            <>
+                              <strong>Full-body photo detected!</strong> We&apos;ll use your photo directly for try-ons.
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    )}
 
                     <div className="space-y-5">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -663,39 +689,42 @@ export default function OnboardPage() {
                         />
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-3">Body Type *</label>
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                          {bodyTypes.map((type) => {
-                            const IconComponent = type.icon;
-                            const isSelected = bodyParameters.bodyType === type.id;
-                            return (
-                              <button
-                                key={type.id}
-                                onClick={() => setBodyParameters({ 
-                                  ...bodyParameters, 
-                                  bodyType: type.id 
-                                })}
-                                className={`p-4 border-2 rounded-xl transition-all flex flex-col items-center gap-2 ${
-                                  isSelected 
-                                    ? 'border-black bg-gray-50' 
-                                    : 'border-gray-200 hover:border-gray-400'
-                                }`}
-                              >
-                                <IconComponent className="h-8 w-8 text-gray-700" />
-                                <div className="text-center">
-                                  <p className="font-semibold text-sm">{type.label}</p>
-                                  <p className="text-xs text-gray-500">{type.desc}</p>
-                                </div>
-                              </button>
-                            );
-                          })}
+                      {/* Body Type - Only for head-only photos */}
+                      {imageAnalysis?.type === "head_only" && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-3">Body Type *</label>
+                          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            {bodyTypes.map((type) => {
+                              const IconComponent = type.icon;
+                              const isSelected = bodyParameters.bodyType === type.id;
+                              return (
+                                <button
+                                  key={type.id}
+                                  onClick={() => setBodyParameters({ 
+                                    ...bodyParameters, 
+                                    bodyType: type.id 
+                                  })}
+                                  className={`p-4 border-2 rounded-xl transition-all flex flex-col items-center gap-2 ${
+                                    isSelected 
+                                      ? 'border-black bg-gray-50' 
+                                      : 'border-gray-200 hover:border-gray-400'
+                                  }`}
+                                >
+                                  <IconComponent className="h-8 w-8 text-gray-700" />
+                                  <div className="text-center">
+                                    <p className="font-semibold text-sm">{type.label}</p>
+                                    <p className="text-xs text-gray-500">{type.desc}</p>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       <button
                         onClick={handleParametersSubmit}
-                        disabled={loading || !bodyParameters.bodyType}
+                        disabled={loading || (imageAnalysis?.type === "head_only" && !bodyParameters.bodyType)}
                         className="w-full bg-black text-white py-3 sm:py-4 rounded-xl font-semibold hover:bg-gray-800 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
                       >
                         Generate Body Options <ArrowRight className="h-5 w-5" />

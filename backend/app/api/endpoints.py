@@ -170,13 +170,14 @@ async def process_virtual_tryon(
         
         logger.info(f"Try-on processed in {result['processing_time']:.2f}s")
         
-        # Save result to database for history (if user is authenticated)
+        # Save result to database for history
         try:
-            # Try to get user_id from session or local storage
-            # For now, we'll use request_id as a placeholder
-            # TODO: Extract user_id from authentication header
+            # Extract user_id from request headers or authentication
+            # For now, using request_id as fallback until auth middleware is implemented
+            user_id = request_id  # Will be replaced with actual user_id from JWT token
+            
             db_record = supabase_storage.save_tryon_result_db(
-                user_id=request_id,  # Placeholder - should be actual user_id
+                user_id=user_id,
                 personal_image_url=user_url,
                 garment_url=garment_url,
                 result_url=result['result_url'],

@@ -57,8 +57,9 @@ type APIConfig = {
 
 // API Configuration
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const DEFAULT_TIMEOUT = 60000; // 60 seconds
-const LONG_TIMEOUT = 180000; // 3 minutes for ML operations
+// No timeouts - wait indefinitely for ML operations
+const DEFAULT_TIMEOUT = 0; // Infinite
+const LONG_TIMEOUT = 0; // Infinite
 
 class APIError extends Error {
   constructor(public status: number, message: string) {
@@ -87,7 +88,12 @@ const api = {
   async request<T>(endpoint: string, options: RequestInit = {}, config: APIConfig = {}): Promise<T> {
     const timeout = config.timeout || DEFAULT_TIMEOUT;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    let timeoutId: NodeJS.Timeout | undefined;
+    
+    // Only set timeout if it's not 0 (infinite)
+    if (timeout > 0) {
+      timeoutId = setTimeout(() => controller.abort(), timeout);
+    }
 
     try {
       // Get auth headers
@@ -103,7 +109,7 @@ const api = {
         signal: controller.signal,
       });
 
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -112,7 +118,7 @@ const api = {
 
       return await response.json();
     } catch (error) {
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
       if (error instanceof APIError) throw error;
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
@@ -367,7 +373,7 @@ export const endpoints = {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('photo_url, created_at, updated_at')
+        .select('photo_url, is_full_body, created_at, updated_at')
         .eq('id', userId)
         .single();
 
@@ -375,11 +381,9 @@ export const endpoints = {
         return null;
       }
 
-      // For now, we'll assume full-body unless we have metadata
-      // In a real implementation, this would be stored in the profile
       return {
         url: data.photo_url,
-        type: 'full-body', // Default assumption
+        type: data.is_full_body ? 'full-body' : 'head-only',
         uploadedAt: new Date(data.updated_at || data.created_at),
       };
     } catch (error) {
@@ -394,6 +398,9 @@ export const endpoints = {
     uploadedAt: Date;
   }> => {
     try {
+      // First analyze the image to determine type
+      const analysis = await endpoints.analyzeImage(file);
+      
       // Upload to Supabase storage
       const fileName = `${userId}/${Date.now()}_${file.name}`;
       const { error: uploadError } = await supabase.storage
@@ -409,11 +416,13 @@ export const endpoints = {
         .from('user-uploads')
         .getPublicUrl(fileName);
 
-      // Update profile
+      // Update profile with image type from analysis
+      const isFullBody = analysis.type === 'full_body';
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
           photo_url: publicUrl,
+          is_full_body: isFullBody,
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId);
@@ -424,7 +433,7 @@ export const endpoints = {
 
       return {
         url: publicUrl,
-        type: 'full-body', // Default assumption
+        type: isFullBody ? 'full-body' : 'head-only',
         uploadedAt: new Date(),
       };
     } catch (error) {

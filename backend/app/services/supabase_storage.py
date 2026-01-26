@@ -83,7 +83,7 @@ class SupabaseStorageService:
                 file=file_data,
                 file_options={
                     "content-type": content_type,
-                    "upsert": True
+                    "upsert": "true"
                 }
             )
             
@@ -123,7 +123,7 @@ class SupabaseStorageService:
                 file=file_data,
                 file_options={
                     "content-type": content_type,
-                    "upsert": True
+                    "upsert": "true"
                 }
             )
             
@@ -519,7 +519,7 @@ class SupabaseStorageService:
                 file=file_content,
                 file_options={
                     "content-type": file.content_type,
-                    "upsert": True  # Allow overwriting existing personal image
+                    "upsert": "true"  # Allow overwriting existing personal image
                 }
             )
             
