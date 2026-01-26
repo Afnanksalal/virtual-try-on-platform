@@ -101,32 +101,26 @@ class IDMVTONPipeline:
             
             if checkpoint_path.exists() and any(checkpoint_path.iterdir()):
                 logger.info(f"Loading IDM-VTON checkpoint from {checkpoint_path}")
-                # Load custom IDM-VTON checkpoint
-                # Try fp16 variant first, fall back to default if not available
+                # Try loading custom checkpoint
                 try:
                     self.diffusion_pipeline = AutoPipelineForInpainting.from_pretrained(
                         str(checkpoint_path),
                         torch_dtype=self.dtype,
-                        variant="fp16" if self.dtype == torch.float16 else None,
                     )
-                except (ValueError, OSError) as e:
-                    if "variant" in str(e).lower():
-                        logger.warning("fp16 variant not found, loading default precision")
-                        self.diffusion_pipeline = AutoPipelineForInpainting.from_pretrained(
-                            str(checkpoint_path),
-                            torch_dtype=self.dtype,
-                        )
-                    else:
-                        raise
-            else:
-                logger.warning("IDM-VTON checkpoint not found, using SDXL Inpainting as fallback")
-                logger.info("To use full IDM-VTON, run: python backend/ml_engine/weights/idm-vton/download_weights.py")
+                except Exception as e:
+                    logger.warning(f"Failed to load local checkpoint: {e}")
+                    logger.info("Falling back to HuggingFace model")
+                    # Fall through to HuggingFace download
+                    checkpoint_path = None
+            
+            if not checkpoint_path or not checkpoint_path.exists():
+                logger.warning("IDM-VTON checkpoint not found, downloading from HuggingFace")
+                logger.info("Downloading yisol/IDM-VTON model (this may take a while)...")
                 
-                # Fallback to SDXL Inpainting
+                # Download directly from HuggingFace
                 self.diffusion_pipeline = AutoPipelineForInpainting.from_pretrained(
-                    "diffusers/stable-diffusion-xl-1.0-inpainting-0.1",
+                    "yisol/IDM-VTON",
                     torch_dtype=self.dtype,
-                    variant="fp16" if self.dtype == torch.float16 else None,
                 )
             
             # Move to device
