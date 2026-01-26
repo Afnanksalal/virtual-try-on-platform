@@ -40,7 +40,21 @@ class TryOnService:
         if self.pipeline is None:
             logger.info("Loading IDM-VTON pipeline...")
             self.pipeline = IDMVTONPipeline()
-            logger.info("IDM-VTON pipeline loaded")
+            
+            # Load models from local checkpoint or HuggingFace
+            import os
+            from pathlib import Path
+            
+            # Check for local weights first
+            weights_dir = Path(__file__).parent.parent.parent / "ml_engine" / "weights" / "idm-vton"
+            if weights_dir.exists() and (weights_dir / "checkpoint").exists():
+                logger.info(f"Loading from local weights: {weights_dir}")
+                self.pipeline.load_models(str(weights_dir))
+            else:
+                logger.info("Loading from HuggingFace: yisol/IDM-VTON")
+                self.pipeline.load_models("yisol/IDM-VTON")
+            
+            logger.info("IDM-VTON pipeline loaded successfully")
     
     def _save_result(
         self,
@@ -110,14 +124,10 @@ class TryOnService:
             
             # Parse options
             options = options or {}
-            target_size = options.get("target_size", (512, 768))
+            garment_description = options.get("garment_description", "clothing")
             num_inference_steps = options.get("num_inference_steps", 30)
-            guidance_scale = options.get("guidance_scale", 7.5)
-            return_intermediate = options.get("return_intermediate", False)
-            
-            # Validate target size
-            if not isinstance(target_size, (tuple, list)) or len(target_size) != 2:
-                raise ValueError("target_size must be a tuple of (width, height)")
+            guidance_scale = options.get("guidance_scale", 2.0)  # IDM-VTON default is 2.0
+            seed = options.get("seed", 42)
             
             # Validate inference steps
             if not isinstance(num_inference_steps, int) or num_inference_steps < 1:
@@ -127,18 +137,18 @@ class TryOnService:
             if not isinstance(guidance_scale, (int, float)) or guidance_scale < 0:
                 raise ValueError("guidance_scale must be a non-negative number")
             
-            logger.debug(f"Options: size={target_size}, steps={num_inference_steps}, "
-                        f"guidance={guidance_scale}")
+            logger.debug(f"Options: steps={num_inference_steps}, "
+                        f"guidance={guidance_scale}, seed={seed}")
             
             # Run IDM-VTON pipeline
             logger.info("Running IDM-VTON pipeline...")
             pipeline_result = self.pipeline(
                 person_image=person_image,
                 garment_image=garment_image,
-                target_size=tuple(target_size),
+                garment_description=garment_description,
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
-                return_intermediate=return_intermediate,
+                seed=seed,
             )
             
             result_image = pipeline_result["result"]
@@ -156,23 +166,16 @@ class TryOnService:
                 "result_url": result_url,
                 "processing_time": round(processing_time, 2),
                 "metadata": {
-                    "target_size": target_size,
+                    "garment_description": garment_description,
                     "num_inference_steps": num_inference_steps,
                     "guidance_scale": guidance_scale,
+                    "seed": seed,
                     "result_dimensions": {
                         "width": result_image.width,
                         "height": result_image.height,
                     }
                 }
             }
-            
-            # Add intermediate results if requested
-            if return_intermediate:
-                response["intermediate"] = {
-                    "segmentation_available": "segmentation_mask" in pipeline_result,
-                    "pose_available": "pose_map" in pipeline_result,
-                    "mask_available": "inpainting_mask" in pipeline_result,
-                }
             
             logger.info(f"Try-on completed in {processing_time:.2f}s")
             return response
