@@ -41,18 +41,10 @@ class TryOnService:
             logger.info("Loading IDM-VTON pipeline...")
             self.pipeline = IDMVTONPipeline()
             
-            # Load models from local checkpoint or HuggingFace
-            import os
-            from pathlib import Path
-            
-            # Check for local weights first
-            weights_dir = Path(__file__).parent.parent.parent / "ml_engine" / "weights" / "idm-vton"
-            if weights_dir.exists() and (weights_dir / "checkpoint").exists():
-                logger.info(f"Loading from local weights: {weights_dir}")
-                self.pipeline.load_models(str(weights_dir))
-            else:
-                logger.info("Loading from HuggingFace: yisol/IDM-VTON")
-                self.pipeline.load_models("yisol/IDM-VTON")
+            # ALWAYS load from HuggingFace - local weights have incompatible custom UNet classes
+            logger.info("Loading from HuggingFace: yisol/IDM-VTON")
+            logger.warning("Note: Local weights require custom UNet classes from official repo")
+            self.pipeline.load_models("yisol/IDM-VTON")
             
             logger.info("IDM-VTON pipeline loaded successfully")
     
