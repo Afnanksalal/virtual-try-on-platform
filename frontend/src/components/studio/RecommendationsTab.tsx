@@ -116,8 +116,8 @@ export default function RecommendationsTab({
               {/* Product Image */}
               <div className="relative aspect-square bg-gray-100">
                 <Image
-                  src={recommendation.imageUrl}
-                  alt={`${recommendation.name} - ${recommendation.description}, priced at ${recommendation.currency} ${recommendation.price}`}
+                  src={recommendation.image_url}
+                  alt={`${recommendation.name} in ${recommendation.category}, priced at ${recommendation.currency} ${recommendation.price.toFixed(2)}`}
                   fill
                   className="object-cover"
                   unoptimized
@@ -129,17 +129,19 @@ export default function RecommendationsTab({
                 <h3 className="font-semibold text-sm sm:text-base text-gray-900 mb-1 line-clamp-2">
                   {recommendation.name}
                 </h3>
-                <p className="text-xs sm:text-sm text-gray-600 mb-2 line-clamp-2">
-                  {recommendation.description}
+                <p className="text-xs sm:text-sm text-gray-600 mb-2">
+                  {recommendation.category}
                 </p>
                 
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-base sm:text-lg font-bold text-gray-900">
-                    {recommendation.currency} {recommendation.price}
+                    {recommendation.currency} ${recommendation.price.toFixed(2)}
                   </div>
-                  <div className="text-xs text-gray-500">
-                    {recommendation.source}
-                  </div>
+                  {recommendation.condition && (
+                    <div className="text-xs text-gray-500">
+                      {recommendation.condition}
+                    </div>
+                  )}
                 </div>
 
                 {/* Actions */}
@@ -152,11 +154,11 @@ export default function RecommendationsTab({
                     Use for Try-On
                   </button>
                   <a
-                    href={recommendation.productUrl}
+                    href={recommendation.ebay_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center justify-center px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors min-h-[44px] min-w-[44px]"
-                    aria-label={`View ${recommendation.name} on ${recommendation.source} (opens in new tab)`}
+                    aria-label={`View ${recommendation.name} on eBay (opens in new tab)`}
                   >
                     <ExternalLink className="h-4 w-4 text-gray-600" aria-hidden="true" />
                   </a>

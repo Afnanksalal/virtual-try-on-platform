@@ -7,16 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { endpoints } from "@/lib/api";
 import { toast } from "sonner";
 import ProtectedRoute from "@/components/ProtectedRoute";
-
-interface Recommendation {
-  id: string;
-  name: string;
-  image_url: string;
-  price: number;
-  currency: string;
-  category: string;
-  ebay_url: string;
-}
+import { Recommendation } from "@/lib/types";
 
 export default function ShopPage() {
   const router = useRouter();
@@ -138,7 +129,7 @@ export default function ShopPage() {
                     <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">{rec.name}</h3>
                     <div className="flex items-center justify-between">
                       <p className="text-lg font-bold text-gray-900">
-                        {rec.currency === 'USD' ? '$' : rec.currency}{rec.price.toFixed(2)}
+                        {rec.currency} ${rec.price.toFixed(2)}
                       </p>
                       <button 
                         onClick={() => handleBuyClick(rec)}

@@ -486,11 +486,23 @@ CRITICAL: Output ONLY the JSON array, no other text."""
         
         for item in results[:10]:  # Limit to top 10 results
             try:
+                # Extract image URL - try multiple possible paths
+                image_url = 'https://via.placeholder.com/400'
+                if 'image' in item:
+                    if isinstance(item['image'], dict):
+                        image_url = item['image'].get('imageUrl') or item['image'].get('url') or image_url
+                    elif isinstance(item['image'], str):
+                        image_url = item['image']
+                elif 'imageUrl' in item:
+                    image_url = item['imageUrl']
+                elif 'thumbnailImages' in item and len(item['thumbnailImages']) > 0:
+                    image_url = item['thumbnailImages'][0].get('imageUrl', image_url)
+                
                 # Extract product data
                 product = {
                     "id": item.get('itemId', ''),
                     "name": item.get('title', query),
-                    "image_url": item.get('image', {}).get('imageUrl', 'https://via.placeholder.com/400'),
+                    "image_url": image_url,
                     "price": float(item.get('price', {}).get('value', 0)),
                     "currency": item.get('price', {}).get('currency', 'USD'),
                     "category": self._extract_category(item, query),

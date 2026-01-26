@@ -159,7 +159,7 @@ export const endpoints = {
     userPhoto: File,
     wardrobeImages?: File[],
     generatedImages?: File[]
-  ): Promise<RecommendationItem[]> => {
+  ): Promise<Recommendation[]> => {
     const formData = new FormData();
     formData.append("user_photo", userPhoto);
     

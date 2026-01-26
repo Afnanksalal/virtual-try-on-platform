@@ -86,26 +86,22 @@ export interface WardrobeItem {
   date?: string; // Computed field
 }
 
-// Recommendation Types
+// Recommendation Types - matches backend API response
 export interface Recommendation {
   id: string;
   name: string;
-  description: string;
-  imageUrl: string;
-  price: string;
+  image_url: string;
+  price: number;
   currency: string;
-  source: string;
-  productUrl: string;
   category: string;
+  ebay_url: string;
+  condition?: string;
+  shipping?: number;
+  relevance_score?: number;
 }
 
-export interface RecommendationItem {
-  name: string;
-  description: string;
-  color_theory: string;
-  items: string[];
-  ebay_tags: string;
-}
+// Alias for backward compatibility
+export type RecommendationItem = Recommendation;
 
 // Shop Types
 export interface ShopItem {

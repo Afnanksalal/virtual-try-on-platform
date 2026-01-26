@@ -11,6 +11,7 @@ interface Recommendation {
   name: string;
   image_url: string;
   price: number;
+  currency: string;
   category: string;
   ebay_url: string;
 }
@@ -116,7 +117,7 @@ export default function Recommendations() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <h4 className="font-semibold text-gray-900 text-sm line-clamp-1">{rec.name}</h4>
-                    <span className="text-sm font-medium text-primary-600">${rec.price.toFixed(2)}</span>
+                    <span className="text-sm font-medium text-primary-600">{rec.currency} ${rec.price.toFixed(2)}</span>
                   </div>
                   <p className="text-xs text-gray-500 uppercase tracking-wide">{rec.category}</p>
                   <button

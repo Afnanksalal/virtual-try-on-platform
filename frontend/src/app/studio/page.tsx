@@ -178,22 +178,9 @@ function StudioContent() {
       const blob = await response.blob();
       const personalImageFile = new File([blob], 'personal.jpg', { type: blob.type });
 
-      const recommendationItems = await endpoints.getRecommendations(personalImageFile);
+      const recommendations = await endpoints.getRecommendations(personalImageFile);
 
-      // Transform API response to Recommendation type
-      const transformedRecommendations: Recommendation[] = recommendationItems.map((item, index) => ({
-        id: item.id || `rec-${Date.now()}-${index}`,
-        name: item.name,
-        description: item.category || 'Recommended for you',
-        imageUrl: item.image_url,
-        price: item.price.toString(),
-        currency: '$',
-        source: 'eBay',
-        productUrl: item.ebay_url,
-        category: item.category,
-      }));
-
-      setRecommendations(transformedRecommendations);
+      setRecommendations(recommendations);
       setIsLoadingRecommendations(false);
       setActiveTab('recommendations'); // Auto-switch to recommendations tab
 
@@ -222,7 +209,7 @@ function StudioContent() {
 
     try {
       // Download recommendation image
-      const response = await fetch(recommendation.imageUrl);
+      const response = await fetch(recommendation.image_url);
       const blob = await response.blob();
       const file = new File([blob], `${recommendation.name}.jpg`, { type: blob.type });
 
