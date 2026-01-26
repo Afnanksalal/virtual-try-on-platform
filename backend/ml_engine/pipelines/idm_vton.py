@@ -102,11 +102,22 @@ class IDMVTONPipeline:
             if checkpoint_path.exists() and any(checkpoint_path.iterdir()):
                 logger.info(f"Loading IDM-VTON checkpoint from {checkpoint_path}")
                 # Load custom IDM-VTON checkpoint
-                self.diffusion_pipeline = AutoPipelineForInpainting.from_pretrained(
-                    str(checkpoint_path),
-                    torch_dtype=self.dtype,
-                    variant="fp16" if self.dtype == torch.float16 else None,
-                )
+                # Try fp16 variant first, fall back to default if not available
+                try:
+                    self.diffusion_pipeline = AutoPipelineForInpainting.from_pretrained(
+                        str(checkpoint_path),
+                        torch_dtype=self.dtype,
+                        variant="fp16" if self.dtype == torch.float16 else None,
+                    )
+                except (ValueError, OSError) as e:
+                    if "variant" in str(e).lower():
+                        logger.warning("fp16 variant not found, loading default precision")
+                        self.diffusion_pipeline = AutoPipelineForInpainting.from_pretrained(
+                            str(checkpoint_path),
+                            torch_dtype=self.dtype,
+                        )
+                    else:
+                        raise
             else:
                 logger.warning("IDM-VTON checkpoint not found, using SDXL Inpainting as fallback")
                 logger.info("To use full IDM-VTON, run: python backend/ml_engine/weights/idm-vton/download_weights.py")
