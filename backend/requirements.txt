@@ -4,53 +4,38 @@ uvicorn[standard]==0.34.0
 pydantic==2.10.5
 python-multipart==0.0.20
 
-# ML/AI - SDXL Body Generation (PRODUCTION)
-# PyTorch 2.5.1 supports Python 3.9-3.12
+# ML/AI - PyTorch Stack (Python 3.10.12 compatible)
 torch==2.5.1
 torchvision==0.20.1
-# Diffusers 0.32.2 supports Python 3.8+
 diffusers==0.32.2
-# Transformers 4.48.2 supports Python 3.8+
 transformers==4.48.2
-# Accelerate 1.2.1 supports Python 3.8+
 accelerate==1.2.1
 safetensors==0.4.5
-# xformers 0.0.29.post1 supports Python 3.9-3.12
 xformers==0.0.29.post1
 huggingface-hub==0.27.1
-# ControlNet auxiliary models for pose detection
 controlnet-aux==0.0.9
-# Segmentation model support (required by controlnet-aux, must be <=0.6.7)
 timm==0.6.7
-# ONNX runtime for controlnet-aux
 onnxruntime==1.21.0
 
 # StableVITON Dependencies
-pytorch-lightning==1.5.0
+pytorch-lightning>=2.0.0
 omegaconf
 albumentations
 open-clip-torch==2.19.0
 matplotlib
 
 # Image Processing
-# Pillow 11.1.0 supports Python 3.9+
 pillow==11.1.0
-# NumPy - compatible version
 numpy>=1.21.6,<1.27.0
-# Scipy - compatible with scikit-image requirement
 scipy>=1.11.2
-# OpenCV 4.10.0.84 supports Python 3.8+
 opencv-python==4.10.0.84
-# Pure Python file type detection (no system dependencies)
 filetype==1.2.0
-# Image manipulation
 scikit-image==0.25.0
 
 # AI Services
-# Google Gen AI SDK 1.10.0 supports Python 3.9+
 google-genai==1.10.0
 
-# Supabase client for storage and database (supports Python 3.8+)
+# Supabase
 supabase==2.14.0
 
 # Development
