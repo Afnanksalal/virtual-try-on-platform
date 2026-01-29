@@ -36,8 +36,8 @@ matplotlib
 # Image Processing
 # Pillow 11.1.0 supports Python 3.9+
 pillow==11.1.0
-# NumPy 2.2.2 supports Python 3.10-3.13
-numpy==2.2.2
+# NumPy - compatible with scipy 1.10.1 requirement (<1.27.0)
+numpy>=1.21.6,<1.27.0
 # OpenCV 4.10.0.84 supports Python 3.8+
 opencv-python==4.10.0.84
 # Pure Python file type detection (no system dependencies)
