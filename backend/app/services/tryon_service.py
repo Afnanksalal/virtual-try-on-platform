@@ -1,7 +1,7 @@
 """
 Virtual Try-On Service
 
-This service handles virtual try-on requests using the IDM-VTON pipeline.
+This service handles virtual try-on requests using the StableVITON pipeline.
 It manages the complete workflow from image upload to result storage.
 """
 
@@ -25,7 +25,7 @@ class TryOnService:
     
     This service:
     1. Validates input images
-    2. Runs IDM-VTON pipeline
+    2. Runs StableVITON pipeline
     3. Saves results to storage
     4. Returns result URLs and metadata
     """
@@ -36,17 +36,16 @@ class TryOnService:
         logger.info("TryOnService initialized - using Supabase storage ONLY")
     
     def _load_pipeline(self):
-        """Lazy load IDM-VTON pipeline."""
+        """Lazy load StableVITON pipeline."""
         if self.pipeline is None:
-            logger.info("Loading IDM-VTON pipeline...")
+            logger.info("Loading StableVITON pipeline...")
             self.pipeline = IDMVTONPipeline()
             
-            # ALWAYS load from HuggingFace - local weights have incompatible custom UNet classes
-            logger.info("Loading from HuggingFace: yisol/IDM-VTON")
-            logger.warning("Note: Local weights require custom UNet classes from official repo")
-            self.pipeline.load_models("yisol/IDM-VTON")
+            # Load StableVITON (auto-clones repo and loads model)
+            logger.info("Loading StableVITON from HuggingFace: rlawjdghek/StableVITON")
+            self.pipeline.load_models("rlawjdghek/StableVITON")
             
-            logger.info("IDM-VTON pipeline loaded successfully")
+            logger.info("StableVITON pipeline loaded successfully")
     
     def _save_result(
         self,
@@ -132,8 +131,8 @@ class TryOnService:
             logger.debug(f"Options: steps={num_inference_steps}, "
                         f"guidance={guidance_scale}, seed={seed}")
             
-            # Run IDM-VTON pipeline
-            logger.info("Running IDM-VTON pipeline...")
+            # Run StableVITON pipeline
+            logger.info("Running StableVITON pipeline...")
             pipeline_result = self.pipeline(
                 person_image=person_image,
                 garment_image=garment_image,

@@ -25,6 +25,14 @@ timm==0.6.7
 # ONNX runtime for controlnet-aux
 onnxruntime==1.21.0
 
+# StableVITON Dependencies
+pytorch-lightning==1.5.0
+omegaconf
+albumentations
+open-clip-torch==2.19.0
+scipy==1.10.1
+matplotlib
+
 # Image Processing
 # Pillow 11.1.0 supports Python 3.9+
 pillow==11.1.0

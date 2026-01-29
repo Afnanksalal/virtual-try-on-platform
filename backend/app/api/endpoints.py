@@ -147,7 +147,7 @@ async def process_virtual_tryon(
     garment_image: UploadFile = File(...),
 ):
     """
-    Process virtual try-on using IDM-VTON model.
+    Process virtual try-on using StableVITON model.
     ALL files stored in Supabase ONLY.
     
     Returns:

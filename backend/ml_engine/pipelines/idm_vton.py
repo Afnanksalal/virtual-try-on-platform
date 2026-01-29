@@ -1,14 +1,13 @@
 """
-IDM-VTON Pipeline for Virtual Try-On
-Based on official implementation: https://github.com/yisol/IDM-VTON
-HuggingFace Model: https://huggingface.co/yisol/IDM-VTON
-
-This implementation loads IDM-VTON directly from HuggingFace with custom UNet classes.
+StableVITON Pipeline for Virtual Try-On
+Using rlawjdghek/StableVITON - CVPR 2024
 """
 
 import torch
 from PIL import Image
-import numpy as np
+import sys
+import os
+from pathlib import Path
 from typing import Optional, Dict
 import logging
 
@@ -17,156 +16,149 @@ logger = logging.getLogger(__name__)
 
 class IDMVTONPipeline:
     """
-    IDM-VTON pipeline for virtual try-on using diffusion models.
-    
-    Loads the complete pipeline from HuggingFace yisol/IDM-VTON with custom UNet classes.
-    The model uses trust_remote_code=True to load custom UNet implementations.
+    StableVITON pipeline for virtual try-on.
+    Uses the cloned StableVITON repository.
     """
     
     def __init__(self, device: str = "cuda"):
-        """
-        Initialize the IDM-VTON pipeline.
-        
-        Args:
-            device: Device to run inference on ('cuda' or 'cpu')
-        """
+        """Initialize StableVITON pipeline."""
         self.device = device
-        self.pipe = None
+        self.model = None
         self.dtype = torch.float16 if device == "cuda" else torch.float32
         
-    def load_models(self, model_id: str = "yisol/IDM-VTON") -> None:
-        """
-        Load IDM-VTON models from HuggingFace.
+        # Find StableVITON repo
+        if os.path.exists("/teamspace/studios/this_studio/StableVITON"):
+            self.repo_path = Path("/teamspace/studios/this_studio/StableVITON")
+        else:
+            backend_dir = Path(__file__).parent.parent.parent
+            self.repo_path = backend_dir / "StableVITON"
         
-        The model contains custom UNet classes that require trust_remote_code=True.
-        This will download and cache the model in ~/.cache/huggingface/hub/
+        logger.info(f"StableVITON repo path: {self.repo_path}")
+        
+    def load_models(self, model_id: str = "rlawjdghek/StableVITON") -> None:
+        """
+        Load StableVITON model from cloned repository.
         
         Args:
-            model_id: HuggingFace model ID (default: yisol/IDM-VTON)
+            model_id: HuggingFace model ID (default: rlawjdghek/StableVITON)
         """
         try:
-            logger.info(f"Loading IDM-VTON from HuggingFace: {model_id}")
-            logger.info("This will download ~20GB of model weights on first run...")
+            if not self.repo_path.exists():
+                raise RuntimeError(
+                    f"StableVITON repository not found at {self.repo_path}\n"
+                    f"Clone it: git clone https://github.com/rlawjdghek/StableVITON"
+                )
             
-            from diffusers import DiffusionPipeline
+            logger.info(f"Found StableVITON at: {self.repo_path}")
             
-            # Load the complete pipeline from HuggingFace with custom code
-            # The yisol/IDM-VTON repo contains custom UNet classes
-            logger.info("Downloading model (this may take several minutes)...")
-            self.pipe = DiffusionPipeline.from_pretrained(
-                model_id,
-                torch_dtype=self.dtype,
-                trust_remote_code=True,  # Required for custom UNet classes
+            # Add repo to path
+            if str(self.repo_path) not in sys.path:
+                sys.path.insert(0, str(self.repo_path))
+            
+            logger.info("Importing StableVITON modules...")
+            
+            # Import StableVITON's model classes
+            from model.networks import ConditionGenerator, SPADEGenerator
+            from model.afwm import AFWM
+            
+            logger.info(f"Loading model weights from {model_id}...")
+            
+            # Download weights from HuggingFace
+            from huggingface_hub import hf_hub_download
+            
+            # Download checkpoint
+            ckpt_path = hf_hub_download(
+                repo_id=model_id,
+                filename="model.ckpt",
+                cache_dir=str(self.repo_path / "ckpts")
             )
             
-            # Move to device
-            if self.device == "cuda":
-                logger.info("Moving models to GPU...")
-                self.pipe.to(self.device)
-                
-                # Enable memory optimizations
-                try:
-                    self.pipe.enable_xformers_memory_efficient_attention()
-                    logger.info("✓ xformers memory optimization enabled")
-                except Exception as e:
-                    logger.warning(f"Could not enable xformers: {e}")
+            logger.info(f"Loading checkpoint from {ckpt_path}...")
             
-            logger.info("✓ IDM-VTON models loaded successfully")
-            logger.info(f"Model cached in: ~/.cache/huggingface/hub/")
+            # Load checkpoint
+            checkpoint = torch.load(ckpt_path, map_location=self.device)
+            
+            # Initialize models
+            self.condition_generator = ConditionGenerator().to(self.device)
+            self.generator = SPADEGenerator().to(self.device)
+            self.afwm = AFWM().to(self.device)
+            
+            # Load weights
+            self.condition_generator.load_state_dict(checkpoint['condition_generator'])
+            self.generator.load_state_dict(checkpoint['generator'])
+            self.afwm.load_state_dict(checkpoint['afwm'])
+            
+            # Set to eval mode
+            self.condition_generator.eval()
+            self.generator.eval()
+            self.afwm.eval()
+            
+            logger.info("✓ StableVITON loaded successfully")
             
         except Exception as e:
-            logger.error(f"Failed to load IDM-VTON: {str(e)}", exc_info=True)
-            raise RuntimeError(f"IDM-VTON loading failed: {str(e)}")
-    
-    def _preprocess_image(
-        self,
-        image: Image.Image,
-        target_size: tuple = (768, 1024)
-    ) -> Image.Image:
-        """
-        Preprocess image to target size.
-        IDM-VTON uses (768, 1024) as default size.
-        
-        Args:
-            image: Input PIL image
-            target_size: Target (width, height) tuple
-            
-        Returns:
-            Preprocessed PIL image
-        """
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-        
-        if image.size != target_size:
-            image = image.resize(target_size, Image.Resampling.LANCZOS)
-        
-        return image
+            logger.error(f"Failed to load StableVITON: {str(e)}", exc_info=True)
+            raise RuntimeError(f"StableVITON loading failed: {str(e)}")
     
     def __call__(
         self,
         person_image: Image.Image,
         garment_image: Image.Image,
         garment_description: str = "clothing",
-        num_inference_steps: int = 30,
-        guidance_scale: float = 2.0,
+        num_inference_steps: int = 50,
+        guidance_scale: float = 2.5,
         seed: Optional[int] = 42,
     ) -> Dict:
         """
-        Run IDM-VTON virtual try-on.
+        Run StableVITON virtual try-on.
         
         Args:
             person_image: Person image (PIL Image)
             garment_image: Garment image (PIL Image)
-            garment_description: Text description of garment
-            num_inference_steps: Number of diffusion steps (default: 30)
-            guidance_scale: Classifier-free guidance scale (default: 2.0)
-            seed: Random seed for reproducibility
+            garment_description: Text description
+            num_inference_steps: Number of steps
+            guidance_scale: Guidance scale
+            seed: Random seed
             
         Returns:
-            Dictionary containing:
-                - result: Final try-on result image
+            Dictionary with result image
         """
         try:
-            if self.pipe is None:
-                raise RuntimeError("Models not loaded. Call load_models() first.")
+            if self.model is None:
+                raise RuntimeError("Model not loaded. Call load_models() first.")
             
-            logger.info("Starting IDM-VTON inference...")
+            logger.info("Starting StableVITON inference...")
+            
+            # Set seed
+            if seed is not None:
+                torch.manual_seed(seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed(seed)
             
             # Preprocess images
-            logger.info("Preprocessing images...")
-            person_processed = self._preprocess_image(person_image, (768, 1024))
-            garment_processed = self._preprocess_image(garment_image, (768, 1024))
+            from utils.preprocessing import preprocess_image
             
-            # Set random seed
-            generator = torch.Generator(self.device).manual_seed(seed) if seed is not None else None
+            person_tensor = preprocess_image(person_image).to(self.device)
+            garment_tensor = preprocess_image(garment_image).to(self.device)
             
-            # Run inference using the pipeline's __call__ method
-            # The exact parameters depend on how the custom pipeline is implemented
-            logger.info(f"Running inference ({num_inference_steps} steps)...")
-            
+            # Run inference
             with torch.no_grad():
-                # Try calling the pipeline - the custom implementation should handle the rest
-                result = self.pipe(
-                    person_image=person_processed,
-                    garment_image=garment_processed,
-                    prompt=f"model wearing {garment_description}",
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    generator=generator,
-                )
+                # Generate conditions
+                conditions = self.condition_generator(person_tensor, garment_tensor)
                 
-                # Extract the result image
-                if hasattr(result, 'images'):
-                    result_image = result.images[0]
-                elif isinstance(result, list):
-                    result_image = result[0]
-                else:
-                    result_image = result
+                # Warp garment
+                warped_garment = self.afwm(garment_tensor, conditions)
+                
+                # Generate final result
+                result_tensor = self.generator(person_tensor, warped_garment, conditions)
             
-            logger.info("✓ IDM-VTON inference completed")
+            # Convert to PIL
+            from utils.postprocessing import tensor_to_pil
+            result_image = tensor_to_pil(result_tensor)
+            
+            logger.info("✓ StableVITON inference completed")
             
             return {"result": result_image}
             
         except Exception as e:
-            logger.error(f"IDM-VTON inference failed: {str(e)}", exc_info=True)
-            raise RuntimeError(f"IDM-VTON inference error: {str(e)}")
+            logger.error(f"StableVITON inference failed: {str(e)}", exc_info=True)
+            raise RuntimeError(f"StableVITON inference error: {str(e)}")
