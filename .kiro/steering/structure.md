@@ -72,7 +72,7 @@ backend/
 │   │   ├── pose.py            # Pose estimation
 │   │   ├── reconstruction.py  # 3D reconstruction (PIFuHD)
 │   │   ├── segmentation.py    # Image segmentation
-│   │   └── tryon.py           # Virtual try-on (IDM-VTON)
+│   │   └── idm_vton.py        # Virtual try-on (CatVTON)
 │   └── weights/               # Model weights storage
 ├── main.py                    # FastAPI application entry
 ├── requirements.txt
@@ -110,8 +110,8 @@ data/
 ### ML Pipeline Flow
 1. User uploads images → API endpoint
 2. Service layer validates and preprocesses
-3. ML Engine pipelines execute (segmentation → pose → try-on)
-4. Results saved to data/results
+3. ML Engine pipelines execute (CatVTON with auto-masking)
+4. Results saved to Supabase storage
 5. Response returned with result URL
 
 ## Naming Conventions

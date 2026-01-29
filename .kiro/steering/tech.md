@@ -35,13 +35,22 @@
 - Python-multipart for file uploads
 
 **ML/AI Stack**:
-- PyTorch 2.5.1 + TorchVision 0.20.1
-- Diffusers 0.32.2 (SDXL body generation)
-- Transformers 4.48.2
-- Accelerate 1.2.1
+- PyTorch 2.4.0 + TorchVision 0.19.0
+- Diffusers (latest from git)
+- Transformers 4.46.3
+- Accelerate 0.31.0
 - xformers 0.0.29.post1 (memory-efficient attention)
 - safetensors 0.4.5
-- huggingface-hub 0.27.1
+- huggingface-hub 0.25.0
+
+**Virtual Try-On**:
+- CatVTON (zhengchong/CatVTON)
+  - Lightweight: 899M parameters, 49.57M trainable
+  - Memory efficient: <8GB VRAM for 1024x768
+  - Auto-masking: DensePose + SCHP
+  - No text prompts or pose estimation needed
+- PEFT 0.14.0 (Parameter-Efficient Fine-Tuning)
+- Gradio 4.41.0 (for CatVTON compatibility)
 
 **Image Processing**:
 - Pillow 11.1.0

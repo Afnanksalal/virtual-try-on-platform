@@ -5,32 +5,36 @@ pydantic==2.10.5
 python-multipart==0.0.20
 
 # ML/AI - PyTorch Stack (Python 3.10.12 compatible)
-torch==2.5.1
-torchvision==0.20.1
-diffusers==0.32.2
-transformers==4.48.2
-accelerate==1.2.1
+torch==2.4.0
+torchvision==0.19.0
+accelerate==0.31.0
 safetensors==0.4.5
 xformers==0.0.29.post1
-huggingface-hub==0.27.1
-controlnet-aux==0.0.9
+huggingface-hub==0.25.0
+transformers==4.46.3
 timm==0.6.7
-onnxruntime==1.21.0
 
-# StableVITON Dependencies
-pytorch-lightning>=2.0.0
-omegaconf
-albumentations
-open-clip-torch==2.19.0
-matplotlib
+# Diffusers (CatVTON requires latest from git)
+git+https://github.com/huggingface/diffusers.git
+
+# CatVTON Dependencies
+omegaconf==2.3.0
+peft==0.14.0
+fvcore==0.1.5.post20221221
+cloudpickle==3.0.0
+pycocotools==2.0.8
+av==12.3.0
+gradio==4.41.0
 
 # Image Processing
-pillow==11.1.0
-numpy>=1.21.6,<1.27.0
-scipy>=1.11.2
+pillow==10.3.0
+numpy==1.26.4
+scipy==1.13.1
 opencv-python==4.10.0.84
+scikit-image==0.24.0
+matplotlib==3.9.1
 filetype==1.2.0
-scikit-image==0.25.0
+tqdm==4.66.4
 
 # AI Services
 google-genai==1.10.0
@@ -44,3 +48,5 @@ einops==0.8.0
 httpx[http2]==0.28.1
 requests==2.32.3
 slowapi==0.1.9
+PyYAML==6.0.1
+setuptools==51.0.0

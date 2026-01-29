@@ -4,7 +4,7 @@ Virtual Try-On Platform - An AI-powered fashion technology application that enab
 
 ## Core Features
 
-- **Virtual Try-On**: Upload user photos and garment images to generate realistic try-on results using ML models (segmentation, pose estimation, IDM-VTON)
+- **Virtual Try-On**: Upload user photos and garment images to generate realistic try-on results using CatVTON (lightweight diffusion model with automatic mask generation via DensePose + SCHP)
 - **Body Generation**: Create synthetic body models based on user parameters (ethnicity, body type, height, weight) using SDXL diffusion models
 - **AI Recommendations**: Get personalized outfit recommendations using Gemini Vision API and eBay product search
 - **Smart Onboarding**: Analyze uploaded photos to determine if they're head-only or full-body shots, then generate appropriate body models

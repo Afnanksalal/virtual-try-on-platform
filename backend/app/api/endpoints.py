@@ -147,7 +147,7 @@ async def process_virtual_tryon(
     garment_image: UploadFile = File(...),
 ):
     """
-    Process virtual try-on using StableVITON model.
+    Process virtual try-on using CatVTON model.
     ALL files stored in Supabase ONLY.
     
     Returns:
@@ -192,15 +192,18 @@ async def process_virtual_tryon(
         
         logger.info(f"Uploaded input images to Supabase: {user_url}, {garment_url}")
         
-        # Process try-on
+        # Process try-on with CatVTON
         result = tryon_service.process_tryon(
             person_image=user_img,
             garment_image=garment_img,
             request_id=request_id,
             options={
-                "target_size": (512, 768),
-                "num_inference_steps": 30,
-                "guidance_scale": 7.5,
+                "garment_description": "upper",  # "upper", "lower", or "overall"
+                "num_inference_steps": 50,  # CatVTON default
+                "guidance_scale": 2.5,  # CatVTON recommended CFG
+                "seed": 42,
+                "width": 768,
+                "height": 1024,
             }
         )
         

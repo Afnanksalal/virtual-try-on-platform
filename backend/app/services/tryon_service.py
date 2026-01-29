@@ -1,7 +1,7 @@
 """
 Virtual Try-On Service
 
-This service handles virtual try-on requests using the StableVITON pipeline.
+This service handles virtual try-on requests using the CatVTON pipeline.
 It manages the complete workflow from image upload to result storage.
 """
 
@@ -25,7 +25,7 @@ class TryOnService:
     
     This service:
     1. Validates input images
-    2. Runs StableVITON pipeline
+    2. Runs CatVTON pipeline
     3. Saves results to storage
     4. Returns result URLs and metadata
     """
@@ -33,19 +33,19 @@ class TryOnService:
     def __init__(self):
         """Initialize try-on service."""
         self.pipeline = None
-        logger.info("TryOnService initialized - using Supabase storage ONLY")
+        logger.info("TryOnService initialized - using CatVTON with Supabase storage")
     
     def _load_pipeline(self):
-        """Lazy load StableVITON pipeline."""
+        """Lazy load CatVTON pipeline."""
         if self.pipeline is None:
-            logger.info("Loading StableVITON pipeline...")
+            logger.info("Loading CatVTON pipeline...")
             self.pipeline = IDMVTONPipeline()
             
-            # Load StableVITON (auto-clones repo and loads model)
-            logger.info("Loading StableVITON from HuggingFace: rlawjdghek/StableVITON")
-            self.pipeline.load_models("rlawjdghek/StableVITON")
+            # Load CatVTON from HuggingFace
+            logger.info("Loading CatVTON from HuggingFace: zhengchong/CatVTON")
+            self.pipeline.load_models("zhengchong/CatVTON")
             
-            logger.info("StableVITON pipeline loaded successfully")
+            logger.info("CatVTON pipeline loaded successfully")
     
     def _save_result(
         self,
@@ -84,16 +84,19 @@ class TryOnService:
         options: Optional[Dict] = None
     ) -> Dict:
         """
-        Process virtual try-on request.
+        Process virtual try-on request using CatVTON.
         
         Args:
             person_image: Person image (PIL Image)
             garment_image: Garment image (PIL Image)
+            request_id: Unique request identifier
             options: Optional processing options:
-                - target_size: Target processing size (default: (512, 768))
-                - num_inference_steps: Number of diffusion steps (default: 30)
-                - guidance_scale: Guidance scale (default: 7.5)
-                - return_intermediate: Return intermediate results (default: False)
+                - garment_description: Cloth type - "upper", "lower", or "overall" (default: "upper")
+                - num_inference_steps: Number of diffusion steps (default: 50)
+                - guidance_scale: CFG strength (default: 2.5, CatVTON recommended)
+                - seed: Random seed (default: 42)
+                - width: Output width (default: 768)
+                - height: Output height (default: 1024)
         
         Returns:
             Dictionary containing:
@@ -105,7 +108,7 @@ class TryOnService:
         try:
             # Generate request ID
             request_id = str(uuid.uuid4())
-            logger.info(f"Processing try-on request {request_id}")
+            logger.info(f"Processing CatVTON try-on request {request_id}")
             
             # Start timing
             start_time = time.time()
@@ -115,10 +118,12 @@ class TryOnService:
             
             # Parse options
             options = options or {}
-            garment_description = options.get("garment_description", "clothing")
-            num_inference_steps = options.get("num_inference_steps", 30)
-            guidance_scale = options.get("guidance_scale", 2.0)  # IDM-VTON default is 2.0
+            garment_description = options.get("garment_description", "upper")
+            num_inference_steps = options.get("num_inference_steps", 50)
+            guidance_scale = options.get("guidance_scale", 2.5)  # CatVTON default
             seed = options.get("seed", 42)
+            width = options.get("width", 768)
+            height = options.get("height", 1024)
             
             # Validate inference steps
             if not isinstance(num_inference_steps, int) or num_inference_steps < 1:
@@ -128,11 +133,16 @@ class TryOnService:
             if not isinstance(guidance_scale, (int, float)) or guidance_scale < 0:
                 raise ValueError("guidance_scale must be a non-negative number")
             
-            logger.debug(f"Options: steps={num_inference_steps}, "
-                        f"guidance={guidance_scale}, seed={seed}")
+            # Validate garment description
+            if garment_description not in ["upper", "lower", "overall"]:
+                logger.warning(f"Invalid garment_description '{garment_description}', defaulting to 'upper'")
+                garment_description = "upper"
             
-            # Run StableVITON pipeline
-            logger.info("Running StableVITON pipeline...")
+            logger.debug(f"Options: cloth_type={garment_description}, steps={num_inference_steps}, "
+                        f"guidance={guidance_scale}, seed={seed}, size={width}x{height}")
+            
+            # Run CatVTON pipeline
+            logger.info("Running CatVTON pipeline...")
             pipeline_result = self.pipeline(
                 person_image=person_image,
                 garment_image=garment_image,
@@ -140,6 +150,8 @@ class TryOnService:
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
                 seed=seed,
+                width=width,
+                height=height,
             )
             
             result_image = pipeline_result["result"]
@@ -168,7 +180,7 @@ class TryOnService:
                 }
             }
             
-            logger.info(f"Try-on completed in {processing_time:.2f}s")
+            logger.info(f"CatVTON try-on completed in {processing_time:.2f}s")
             return response
             
         except ValueError as e:
