@@ -825,8 +825,11 @@ Example - Person in ethnic/traditional wear:
     
     async def _search_ebay(self, query: str) -> List[Dict]:
         """
-        Search for products using DummyJSON API (free, no rate limits).
-        Returns products with real images and generates eBay search links.
+        Search for products using Platzi Fake Store API (free, no rate limits, great fashion selection).
+        Returns products with real images and generates eBay search links for purchase.
+        
+        API: https://api.escuelajs.co/api/v1/products
+        Categories: 1=Clothes, 4=Shoes, 5=Miscellaneous (accessories)
         
         Args:
             query: Search query string
@@ -834,10 +837,14 @@ Example - Person in ethnic/traditional wear:
         Returns:
             List of product dictionaries with real images
         """
-        # Extract key search terms for DummyJSON
+        import urllib.parse
+        
+        # Extract key search terms for Platzi API
         search_term = self._extract_search_term(query)
         
-        url = f"https://dummyjson.com/products/search?q={search_term}&limit=5"
+        # Platzi API supports title search
+        encoded_term = urllib.parse.quote(search_term)
+        url = f"https://api.escuelajs.co/api/v1/products?title={encoded_term}&limit=10"
         
         # Retry loop with exponential backoff
         last_error = None
@@ -845,23 +852,28 @@ Example - Person in ethnic/traditional wear:
         
         for attempt in range(self.max_retries):
             try:
-                logger.info(f"Searching products for '{search_term}' (attempt {attempt + 1}/{self.max_retries})")
+                logger.info(f"Searching Platzi API for '{search_term}' (attempt {attempt + 1}/{self.max_retries})")
                 
                 response = await self.http_client.get(url)
                 response.raise_for_status()
-                data = response.json()
+                products_data = response.json()  # Platzi returns array directly
                 
-                products_data = data.get('products', [])
+                # Filter to only clothes (1), shoes (4), and accessories/misc (5)
+                fashion_categories = {1, 4, 5}
+                products_data = [
+                    p for p in products_data 
+                    if p.get('category', {}).get('id') in fashion_categories
+                ]
                 
                 if not products_data:
                     # Try category-based search as fallback
-                    category = self._guess_category(query)
-                    if category:
-                        category_url = f"https://dummyjson.com/products/category/{category}?limit=5"
+                    category_id = self._guess_category(query)
+                    if category_id:
+                        category_url = f"https://api.escuelajs.co/api/v1/products?categoryId={category_id}&limit=10"
+                        logger.info(f"Trying category fallback: categoryId={category_id}")
                         response = await self.http_client.get(category_url)
                         if response.status_code == 200:
-                            data = response.json()
-                            products_data = data.get('products', [])
+                            products_data = response.json()
                 
                 if not products_data:
                     logger.warning(f"No products found for '{search_term}'")
@@ -869,15 +881,29 @@ Example - Person in ethnic/traditional wear:
                 
                 # Parse and return products with real images
                 products = []
-                for item in products_data[:3]:  # Top 3 per keyword
-                    # Get the best image (thumbnail or first image)
-                    image_url = item.get('thumbnail') or (item.get('images', [None])[0])
+                for item in products_data[:4]:  # Top 4 per keyword
+                    # Get the best image (first from images array)
+                    images = item.get('images', [])
+                    image_url = None
                     
-                    if not image_url:
-                        continue
+                    # Find a valid imgur image (skip escuelajs.co uploads which may be junk)
+                    for img in images:
+                        if img and 'imgur.com' in img:
+                            image_url = img
+                            break
+                    
+                    # Fallback to first image if no imgur found
+                    if not image_url and images:
+                        image_url = images[0]
+                    
+                    if not image_url or 'escuelajs.co' in image_url:
+                        continue  # Skip items without proper images
                     
                     # Build eBay search URL for "Buy" button
                     ebay_search_url = f"https://www.ebay.com/sch/i.html?_nkw={query.replace(' ', '+')}"
+                    
+                    # Get category name from item
+                    item_category = item.get('category', {}).get('name', 'Fashion')
                     
                     product = {
                         "id": str(item.get('id', hash(item.get('title', '')))),
@@ -885,20 +911,21 @@ Example - Person in ethnic/traditional wear:
                         "image_url": image_url,
                         "price": float(item.get('price', 0)),
                         "currency": "USD",
-                        "category": self._extract_category_from_query(query),
+                        "category": item_category,
                         "ebay_url": ebay_search_url,
                         "condition": "New",
                         "shipping": 0.0,
                         "search_query": query,
-                        "brand": item.get('brand', 'Unknown'),
-                        "rating": item.get('rating', 0),
+                        "brand": "Fashion Brand",
+                        "rating": 4.5,
+                        "description": item.get('description', '')[:100],
                     }
                     product['relevance_score'] = self._calculate_relevance(product, query)
                     products.append(product)
                     logger.info(f"[PRODUCT] {product['name'][:50]}... | ${product['price']} | img: {image_url[:60]}...")
                 
                 if products:
-                    logger.info(f"Returning {len(products)} products with real images for '{query}'")
+                    logger.info(f"Returning {len(products)} fashion products for '{query}'")
                     self.ebay_circuit_breaker.on_success()
                     return products
                 else:
@@ -906,15 +933,15 @@ Example - Person in ethnic/traditional wear:
                     
             except httpx.TimeoutException:
                 last_error = "Request timeout"
-                logger.warning(f"Product API timeout (attempt {attempt + 1}/{self.max_retries})")
+                logger.warning(f"Platzi API timeout (attempt {attempt + 1}/{self.max_retries})")
                 
             except httpx.HTTPStatusError as e:
                 last_error = str(e)
-                logger.warning(f"Product API HTTP error: {e.response.status_code} (attempt {attempt + 1}/{self.max_retries})")
+                logger.warning(f"Platzi API HTTP error: {e.response.status_code} (attempt {attempt + 1}/{self.max_retries})")
                     
             except Exception as e:
                 last_error = str(e)
-                logger.warning(f"Product API error: {e} (attempt {attempt + 1}/{self.max_retries})")
+                logger.warning(f"Platzi API error: {e} (attempt {attempt + 1}/{self.max_retries})")
             
             # Wait before retry
             if attempt < self.max_retries - 1:
@@ -923,52 +950,108 @@ Example - Person in ethnic/traditional wear:
                 delay *= self.retry_backoff
         
         # All retries failed
-        logger.error(f"All product API retries failed for '{query}'. Last error: {last_error}")
+        logger.error(f"All Platzi API retries failed for '{query}'. Last error: {last_error}")
         self.ebay_circuit_breaker.on_failure()
         return self._get_fallback_product(query)
     
     def _extract_search_term(self, query: str) -> str:
-        """Extract clean search term from the query for DummyJSON API."""
-        # Remove gender suffixes and common modifiers
+        """Extract clean search term from the query for Platzi API.
+        
+        Platzi API has products with titles like:
+        - "Classic Comfort Fit Joggers"
+        - "Classic Red Baseball Cap"  
+        - "Rainbow Glitter High Heels"
+        - "Vibrant Pink Classic Sneakers"
+        
+        We extract the main item type for best matching.
+        """
         query_lower = query.lower()
         
-        # Remove gender terms
-        for term in ['mens', 'men', 'womens', 'women', 'male', 'female']:
+        # Remove gender terms and common modifiers
+        remove_terms = ['mens', 'men', 'womens', 'women', 'male', 'female', 
+                        'casual', 'formal', 'stylish', 'trendy', 'modern', 'elegant']
+        for term in remove_terms:
             query_lower = query_lower.replace(term, '').strip()
         
-        # Get core clothing term
-        clothing_terms = ['shirt', 'tshirt', 't-shirt', 'polo', 'jacket', 'hoodie', 
-                         'sweater', 'jeans', 'pants', 'chinos', 'shorts', 'sneakers',
-                         'shoes', 'boots', 'blazer', 'coat', 'dress', 'skirt', 
-                         'blouse', 'cardigan', 'top', 'bag', 'watch']
+        # Priority clothing terms that match Platzi product titles
+        priority_matches = {
+            'jogger': 'jogger',
+            'joggers': 'jogger', 
+            'hoodie': 'hoodie',
+            'cap': 'cap',
+            'baseball cap': 'cap',
+            'hat': 'cap',
+            't-shirt': 't-shirt',
+            'tshirt': 't-shirt',
+            'shirt': 'shirt',
+            'shorts': 'shorts',
+            'sneaker': 'sneaker',
+            'sneakers': 'sneaker',
+            'heel': 'heel',
+            'heels': 'heel',
+            'boot': 'boot',
+            'boots': 'boot',
+            'loafer': 'loafer',
+            'sandal': 'sandal',
+            'jacket': 'jacket',
+            'sweater': 'sweater',
+            'cardigan': 'cardigan',
+            'pants': 'pants',
+            'jean': 'jeans',
+            'jeans': 'jeans',
+            'dress': 'dress',
+        }
         
-        for term in clothing_terms:
-            if term in query_lower:
-                return term
+        # Check for priority matches
+        for keyword, search_term in priority_matches.items():
+            if keyword in query_lower:
+                return search_term
+        
+        # Try to extract a color + item combination
+        colors = ['black', 'white', 'red', 'blue', 'navy', 'green', 'pink', 
+                  'gray', 'grey', 'brown', 'purple', 'orange', 'teal']
+        
+        found_color = None
+        for color in colors:
+            if color in query_lower:
+                found_color = color
+                break
+        
+        # Return color if found (Platzi has color-named items)
+        if found_color:
+            return found_color
         
         # Return first significant word
-        words = query_lower.split()
-        return words[0] if words else 'shirt'
+        words = [w for w in query_lower.split() if len(w) > 2]
+        return words[0] if words else 'classic'
     
-    def _guess_category(self, query: str) -> Optional[str]:
-        """Guess DummyJSON category from search query."""
+    def _guess_category(self, query: str) -> Optional[int]:
+        """Guess Platzi API category ID from search query.
+        
+        Platzi Categories:
+        - 1: Clothes (t-shirts, joggers, caps, shorts, hoodies)
+        - 4: Shoes (sneakers, heels, boots, loafers)
+        - 5: Miscellaneous (bags, accessories)
+        """
         query_lower = query.lower()
         
-        # DummyJSON categories for clothing
-        if any(term in query_lower for term in ['shirt', 'tshirt', 't-shirt', 'polo']):
-            return 'mens-shirts' if 'men' in query_lower else 'tops'
-        if any(term in query_lower for term in ['dress', 'skirt', 'blouse']):
-            return 'womens-dresses'
-        if any(term in query_lower for term in ['sneaker', 'shoe', 'boot']):
-            return 'mens-shoes' if 'men' in query_lower else 'womens-shoes'
-        if any(term in query_lower for term in ['watch']):
-            return 'mens-watches' if 'men' in query_lower else 'womens-watches'
-        if any(term in query_lower for term in ['bag', 'handbag', 'purse']):
-            return 'womens-bags'
-        if any(term in query_lower for term in ['sunglasses', 'glasses']):
-            return 'sunglasses'
+        # Shoes category (id=4)
+        if any(term in query_lower for term in ['sneaker', 'shoe', 'boot', 'heel', 'loafer', 'sandal', 'pump']):
+            return 4
         
-        return None
+        # Clothes category (id=1) - most fashion items
+        if any(term in query_lower for term in ['shirt', 'tshirt', 't-shirt', 'polo', 'hoodie', 'sweater', 
+                                                   'jeans', 'pants', 'shorts', 'jacket', 'blazer', 'coat',
+                                                   'dress', 'skirt', 'blouse', 'cap', 'jogger', 'cardigan']):
+            return 1
+        
+        # Miscellaneous for accessories (id=5)
+        if any(term in query_lower for term in ['bag', 'handbag', 'purse', 'watch', 'sunglasses', 
+                                                   'glasses', 'luggage', 'accessory']):
+            return 5
+        
+        # Default to clothes
+        return 1
     
     def _extract_category_from_query(self, query: str) -> str:
         """Extract category from search query."""

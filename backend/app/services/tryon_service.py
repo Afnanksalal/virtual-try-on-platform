@@ -123,16 +123,19 @@ class TryOnService:
             request_id: Unique request identifier
             options: Optional processing options:
                 - garment_type: Cloth type - "upper_body", "lower_body", or "dresses" (default: "upper_body")
-                - num_inference_steps: Number of diffusion steps (default: 30)
-                - guidance_scale: CFG strength (default: 2.5)
+                - num_inference_steps: Number of diffusion steps (default: 30, range: 10-50)
+                - guidance_scale: CFG strength (default: 2.5, range: 1.0-5.0)
                 - seed: Random seed (default: 42)
+                - model_type: Model variant - "viton_hd" or "dress_code" (default: "viton_hd")
+                - ref_acceleration: Speed up reference UNet (default: False)
+                - repaint: Enable repaint mode (default: False)
         
         Returns:
             Dictionary containing:
                 - request_id: Unique request identifier
                 - result_url: URL to result image
                 - processing_time: Processing time in seconds
-                - metadata: Additional metadata
+                - metadata: Additional metadata including all options used
         """
         try:
             # Generate request ID
@@ -151,6 +154,9 @@ class TryOnService:
             num_inference_steps = options.get("num_inference_steps", 30)
             guidance_scale = options.get("guidance_scale", 2.5)  # Leffa default
             seed = options.get("seed", 42)
+            model_type = options.get("model_type", "viton_hd")  # viton_hd or dress_code
+            ref_acceleration = options.get("ref_acceleration", False)  # Speed up reference UNet
+            repaint = options.get("repaint", False)  # Enable repaint mode
             
             # Map legacy garment types to Leffa types
             garment_type_map = {
@@ -162,21 +168,29 @@ class TryOnService:
             if garment_type in garment_type_map:
                 garment_type = garment_type_map[garment_type]
             
-            # Validate inference steps
+            # Validate inference steps (clamp to reasonable range)
             if not isinstance(num_inference_steps, int) or num_inference_steps < 1:
                 raise ValueError("num_inference_steps must be a positive integer")
+            num_inference_steps = max(10, min(50, num_inference_steps))  # Clamp 10-50
             
-            # Validate guidance scale
+            # Validate guidance scale (clamp to reasonable range)
             if not isinstance(guidance_scale, (int, float)) or guidance_scale < 0:
                 raise ValueError("guidance_scale must be a non-negative number")
+            guidance_scale = max(1.0, min(5.0, float(guidance_scale)))  # Clamp 1.0-5.0
             
             # Validate garment type
             if garment_type not in ["upper_body", "lower_body", "dresses"]:
                 logger.warning(f"Invalid garment_type '{garment_type}', defaulting to 'upper_body'")
                 garment_type = "upper_body"
             
-            logger.debug(f"Options: garment_type={garment_type}, steps={num_inference_steps}, "
-                        f"guidance={guidance_scale}, seed={seed}")
+            # Validate model type
+            if model_type not in ["viton_hd", "dress_code"]:
+                logger.warning(f"Invalid model_type '{model_type}', defaulting to 'viton_hd'")
+                model_type = "viton_hd"
+            
+            logger.debug(f"Options: garment_type={garment_type}, model_type={model_type}, "
+                        f"steps={num_inference_steps}, guidance={guidance_scale}, seed={seed}, "
+                        f"ref_acceleration={ref_acceleration}, repaint={repaint}")
             
             # Run Leffa pipeline
             logger.info("Running Leffa pipeline...")
@@ -184,9 +198,12 @@ class TryOnService:
                 person_image=person_image,
                 garment_image=garment_image,
                 garment_type=garment_type,
+                model_type=model_type,
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
                 seed=seed,
+                ref_acceleration=ref_acceleration,
+                repaint=repaint,
             )
             
             result_image = pipeline_result["result"]
@@ -205,9 +222,12 @@ class TryOnService:
                 "processing_time": round(processing_time, 2),
                 "metadata": {
                     "garment_type": garment_type,
+                    "model_type": model_type,
                     "num_inference_steps": num_inference_steps,
                     "guidance_scale": guidance_scale,
                     "seed": seed,
+                    "ref_acceleration": ref_acceleration,
+                    "repaint": repaint,
                     "result_dimensions": {
                         "width": result_image.width,
                         "height": result_image.height,

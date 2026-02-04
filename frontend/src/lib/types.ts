@@ -56,9 +56,12 @@ export interface TryOnResponse {
   processing_time: number;
   metadata: {
     garment_type: GarmentType;
+    model_type: ModelType;
     num_inference_steps: number;
     guidance_scale: number;
     seed: number;
+    ref_acceleration: boolean;
+    repaint: boolean;
     result_dimensions: {
       width: number;
       height: number;
@@ -133,6 +136,20 @@ export interface ImageAnalysis {
 
 // Garment Types - matching Leffa's supported categories
 export type GarmentType = 'upper_body' | 'lower_body' | 'dresses';
+
+// Model Types - Leffa model variants
+export type ModelType = 'viton_hd' | 'dress_code';
+
+// Try-On Options - advanced LEFFA parameters
+export interface TryOnOptions {
+  garment_type?: GarmentType;
+  model_type?: ModelType;
+  num_inference_steps?: number;  // 10-50, default 30
+  guidance_scale?: number;       // 1.0-5.0, default 2.5
+  seed?: number;
+  ref_acceleration?: boolean;    // Speed up reference UNet
+  repaint?: boolean;             // Enable repaint mode for better edges
+}
 
 // Body Parameters Types
 export interface BodyParameters {

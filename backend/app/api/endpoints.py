@@ -155,24 +155,30 @@ async def process_virtual_tryon(
     num_inference_steps: int = Form(30),
     guidance_scale: float = Form(2.5),
     seed: int = Form(42),
+    model_type: str = Form("viton_hd"),  # "viton_hd" or "dress_code"
+    ref_acceleration: bool = Form(False),  # Speed up reference UNet (slight quality loss)
+    repaint: bool = Form(False),  # Enable repaint mode for better edge handling
 ):
     """
-    Process virtual try-on using Leffa model.
+    Process virtual try-on using Leffa model with advanced options.
     ALL files stored in Supabase ONLY.
     
     Args:
         user_image: User/person image file
         garment_image: Garment image file
         garment_type: Type of garment - "upper_body", "lower_body", or "dresses"
-        num_inference_steps: Number of diffusion steps (default: 30)
-        guidance_scale: CFG scale (default: 2.5)
+        num_inference_steps: Number of diffusion steps (default: 30, range: 10-50)
+        guidance_scale: CFG scale (default: 2.5, range: 1.0-5.0)
         seed: Random seed for reproducibility (default: 42)
+        model_type: Model variant - "viton_hd" (recommended) or "dress_code"
+        ref_acceleration: Speed up reference UNet, slight quality loss (default: False)
+        repaint: Enable repaint mode for better edge handling (default: False)
     
     Returns:
         - request_id: Unique request identifier
         - result_url: Supabase URL to result image
         - processing_time: Processing time in seconds
-        - metadata: Additional processing metadata
+        - metadata: Additional processing metadata including all options used
     """
     try:
         logger.info("Virtual try-on request received")
@@ -220,6 +226,9 @@ async def process_virtual_tryon(
                 "num_inference_steps": num_inference_steps,
                 "guidance_scale": guidance_scale,
                 "seed": seed,
+                "model_type": model_type,  # "viton_hd" or "dress_code"
+                "ref_acceleration": ref_acceleration,
+                "repaint": repaint,
             }
         )
         

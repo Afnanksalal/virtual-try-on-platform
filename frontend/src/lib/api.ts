@@ -7,7 +7,9 @@ import type {
   ImageAnalysis, 
   BodyParameters,
   StorageObject,
-  GarmentType 
+  GarmentType,
+  ModelType,
+  TryOnOptions 
 } from './types';
 
 // Type definitions
@@ -204,20 +206,18 @@ export const endpoints = {
   processTryOn: (
     userImage: File, 
     garmentImage: File, 
-    options?: {
-      garment_type?: GarmentType;
-      num_inference_steps?: number;
-      guidance_scale?: number;
-      seed?: number;
-    }
+    options?: TryOnOptions
   ): Promise<TryOnResponse> => {
     const formData = new FormData();
     formData.append("user_image", userImage);
     formData.append("garment_image", garmentImage);
     formData.append("garment_type", options?.garment_type || "upper_body");
+    formData.append("model_type", options?.model_type || "viton_hd");
     formData.append("num_inference_steps", String(options?.num_inference_steps || 30));
     formData.append("guidance_scale", String(options?.guidance_scale || 2.5));
     formData.append("seed", String(options?.seed || 42));
+    formData.append("ref_acceleration", String(options?.ref_acceleration || false));
+    formData.append("repaint", String(options?.repaint || false));
     return api.post("/api/v1/process-tryon", formData);
   },
 
@@ -367,12 +367,7 @@ export const endpoints = {
   generateTryOn: async (
     personalImageUrl: string, 
     garmentUrl: string,
-    options?: {
-      garment_type?: GarmentType;
-      num_inference_steps?: number;
-      guidance_scale?: number;
-      seed?: number;
-    }
+    options?: TryOnOptions
   ): Promise<TryOnResult> => {
     return withRetry(
       async () => {
