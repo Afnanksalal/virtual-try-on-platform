@@ -351,6 +351,22 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
             List of eBay products with links and color-coordinated recommendations
         """
         try:
+            logger.info("="*60)
+            logger.info("RECOMMENDATION PIPELINE STARTED")
+            logger.info("="*60)
+            
+            # Log detailed user profile
+            if user_profile:
+                logger.info("[USER PROFILE]")
+                logger.info(f"  Gender: {user_profile.get('gender', 'Not specified')}")
+                logger.info(f"  Ethnicity: {user_profile.get('ethnicity', 'Not specified')}")
+                logger.info(f"  Style Preference: {user_profile.get('style_preference', 'Not specified')}")
+                logger.info(f"  Body Type: {user_profile.get('body_type', 'Not specified')}")
+                if user_profile.get('height_cm') and user_profile.get('weight_kg'):
+                    logger.info(f"  Dimensions: {user_profile.get('height_cm')}cm, {user_profile.get('weight_kg')}kg")
+            else:
+                logger.warning("[USER PROFILE] No user profile provided - recommendations may be generic")
+            
             # Step 1: Extract skin tone from user photo (if not provided in profile)
             skin_tone_info = None
             color_recs = None
@@ -360,13 +376,19 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
                 skin_tone_category = user_profile['skin_tone'].lower().replace(' ', '_')
                 color_recs = self.get_color_recommendations(skin_tone_category)
                 skin_tone_info = {"skin_tone_category": skin_tone_category, "confidence": 1.0}
-                logger.info(f"Using provided skin tone: {skin_tone_category}")
+                logger.info(f"[SKIN TONE] Using provided: {skin_tone_category}")
             else:
                 # Extract from image
-                logger.info("Extracting skin tone from user photo...")
+                logger.info("[SKIN TONE] Extracting from user photo...")
                 skin_tone_info = await self.extract_skin_tone(user_photo)
                 color_recs = self.get_color_recommendations(skin_tone_info.get('skin_tone_category', 'medium_warm'))
-                logger.info(f"Extracted skin tone: {skin_tone_info}")
+                logger.info(f"[SKIN TONE] Extracted: {skin_tone_info}")
+            
+            # Log color recommendations
+            logger.info(f"[COLOR THEORY] Best colors: {color_recs.get('best_colors', [])}")
+            logger.info(f"[COLOR THEORY] Avoid colors: {color_recs.get('avoid_colors', [])}")
+            logger.info(f"[COLOR THEORY] Metals: {color_recs.get('metals', [])}")
+            logger.info(f"[COLOR THEORY] Neutrals: {color_recs.get('neutrals', [])}")
             
             # Step 2: Create collage with labels
             all_images = [user_photo]
@@ -385,7 +407,7 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
                 labels=labels,
                 add_borders=True
             )
-            logger.info(f"Created collage from {len(all_images)} images with labels")
+            logger.info(f"[COLLAGE] Created from {len(all_images)} images")
             
             # Step 3: Extract keywords with Gemini Vision (with color theory and user profile)
             keywords = await self._extract_keywords_with_circuit_breaker(
@@ -394,13 +416,22 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
                 skin_tone_info, 
                 color_recs
             )
-            logger.info(f"Extracted keywords: {keywords}")
+            logger.info("[KEYWORDS] Extracted keywords for eBay search:")
+            for i, kw in enumerate(keywords, 1):
+                logger.info(f"  {i}. {kw}")
             
             # Step 4: Search eBay for each keyword (with circuit breaker)
             # Increase results: use top 8 keywords, get 4 items per keyword
+            logger.info("[EBAY SEARCH] Starting eBay product search...")
             products = []
             for keyword in keywords[:8]:  # Top 8 keywords
                 ebay_products = await self._search_ebay_with_circuit_breaker(keyword)
+                if ebay_products:
+                    logger.info(f"[EBAY SEARCH] '{keyword}' -> {len(ebay_products)} products found")
+                    for p in ebay_products[:2]:  # Log first 2 for brevity
+                        logger.info(f"    - {p.get('name', 'N/A')[:50]}... | ${p.get('price', 0):.2f} | img: {p.get('image_url', 'N/A')[:60]}...")
+                else:
+                    logger.warning(f"[EBAY SEARCH] '{keyword}' -> No products found")
                 products.extend(ebay_products[:4])  # Top 4 per keyword
             
             # Deduplicate products by ID
@@ -414,7 +445,11 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
             # Return top 20 products (increased from 10)
             final_products = unique_products[:20]
             
-            logger.info(f"Returning {len(final_products)} unique product recommendations")
+            logger.info("="*60)
+            logger.info(f"[FINAL] Returning {len(final_products)} unique recommendations")
+            for i, p in enumerate(final_products, 1):
+                logger.info(f"  {i}. {p.get('name', 'N/A')[:40]}... | ${p.get('price', 0):.2f}")
+            logger.info("="*60)
             return final_products
             
         except Exception as e:
@@ -432,9 +467,13 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
         color_recs: Optional[Dict] = None
     ) -> List[str]:
         """Extract keywords with circuit breaker protection."""
+        gender = user_profile.get('gender', '') if user_profile else ''
+        ethnicity = user_profile.get('ethnicity', '') if user_profile else ''
+        style = user_profile.get('style_preference', '') if user_profile else ''
+        
         if self.gemini_circuit_breaker.is_open():
-            logger.warning("Gemini circuit breaker is OPEN, using fallback keywords")
-            return self._get_fallback_keywords(color_recs)
+            logger.warning("[CIRCUIT BREAKER] Gemini circuit breaker is OPEN, using fallback keywords")
+            return self._get_fallback_keywords(color_recs, gender, ethnicity, style)
         
         try:
             return self.gemini_circuit_breaker.call(
@@ -445,8 +484,8 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
                 color_recs
             )
         except Exception as e:
-            logger.error(f"Gemini API call failed: {e}")
-            return self._get_fallback_keywords(color_recs)
+            logger.error(f"[GEMINI ERROR] API call failed: {e}")
+            return self._get_fallback_keywords(color_recs, gender, ethnicity, style)
     
     def _extract_keywords_with_color_theory_sync(
         self, 
@@ -491,9 +530,14 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
         Use Gemini Vision to extract clothing keywords with proper color theory based on skin tone.
         Implements retry logic with exponential backoff.
         """
+        # Extract user profile fields for fallback
+        gender = user_profile.get('gender', '') if user_profile else ''
+        ethnicity = user_profile.get('ethnicity', '') if user_profile else ''
+        style = user_profile.get('style_preference', '') if user_profile else ''
+        
         if not self.gemini_client:
             logger.error("Gemini API not configured, using fallback keywords")
-            return self._get_fallback_keywords(color_recs)
+            return self._get_fallback_keywords(color_recs, gender, ethnicity, style)
         
         # Build user profile context
         profile_context = ""
@@ -551,49 +595,87 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
 - Category: {skin_cat.replace('_', ' ').title()}
 - Undertone: {undertone.title()}
 
-**SCIENTIFIC COLOR THEORY RECOMMENDATIONS for this skin tone:**
-- BEST Colors (will make them look vibrant and healthy): {', '.join(best_colors)}
-- AVOID Colors (will wash them out or clash): {', '.join(avoid_colors)}
-- Best Metal Tones for accessories: {', '.join(metals)}
-- Best Neutral Colors: {', '.join(neutrals)}
+**COLOR PALETTE that will look BEST on this person:**
+- Flattering Colors: {', '.join(best_colors)}
+- Colors to AVOID: {', '.join(avoid_colors)}
+- Best Metal Tones: {', '.join(metals)}
+- Safe Neutrals: {', '.join(neutrals)}"""
 
-IMPORTANT: Generate keywords using ONLY the recommended "BEST Colors" and "Best Neutral Colors" above.
-Avoid suggesting items in the "AVOID Colors" at all costs."""
+        # Build gender context (minimal, just for eBay search accuracy)
+        gender = user_profile.get('gender', '').lower() if user_profile else ''
+        gender_suffix = ""
+        if gender in ['male', 'man', 'men', 'masculine']:
+            gender_suffix = "mens/men"
+        elif gender in ['female', 'woman', 'women', 'feminine']:
+            gender_suffix = "womens/women"
 
-        prompt = f"""You are an expert fashion stylist and color theory specialist.
-Analyze this fashion collage image and the provided user data carefully.{profile_context}{color_theory_context}
+        # Optional context from profile (secondary, not primary)
+        optional_context = ""
+        ethnicity = user_profile.get('ethnicity', '') if user_profile else ''
+        style_pref = user_profile.get('style_preference', '') if user_profile else ''
+        
+        if ethnicity or style_pref:
+            optional_context = "\n\n**Optional Profile Hints (use only if relevant to what you observe):**"
+            if ethnicity:
+                optional_context += f"\n- Background: {ethnicity} (consider if their style reflects this)"
+            if style_pref:
+                optional_context += f"\n- Stated preference: {style_pref} (but trust what you SEE over what's stated)"
 
-Generate eBay search keywords for clothing items that would:
-1. PERFECTLY complement the user's skin tone using the color recommendations above
-2. Flatter their body type and proportions
-3. Match their style preference (if provided)
-4. Fill gaps in their current wardrobe (if wardrobe items are shown)
-5. Be appropriate for their gender presentation
+        prompt = f"""You are an expert fashion stylist with exceptional visual analysis skills.
 
-**KEYWORD GENERATION RULES:**
-1. Each keyword must include a specific COLOR from the "BEST Colors" list
-2. Include garment type (shirt, pants, dress, blazer, etc.)
-3. Add size/fit descriptors when relevant (e.g., "plus size", "slim fit", "petite")
-4. Make keywords specific enough for eBay search (3-5 words each)
-5. Include a mix of:
-   - Tops (shirts, blouses, sweaters)
-   - Bottoms (pants, skirts, shorts)
-   - Outerwear (jackets, blazers, coats)
-   - Dresses/jumpsuits (if applicable)
-   - Accessories matching recommended metals
+**YOUR PRIMARY TASK:** Analyze the person in this image and recommend clothes they would ACTUALLY like based on what you SEE.
 
-**Example good keywords:**
-- "navy blue slim fit blazer"
-- "emerald green silk blouse"
-- "burgundy wool sweater women"
-- "charcoal dress pants men"
-- "gold tone statement necklace"
+{color_theory_context}
 
-Output ONLY a JSON array of 8-10 specific, color-coordinated search keywords.
-Do NOT include any explanation or markdown formatting.
+**STEP 1: VISUAL ANALYSIS (Most Important - Study the image carefully)**
 
-Example output:
-["navy blue slim fit blazer", "emerald green silk blouse", "burgundy wool sweater", "charcoal dress pants", "silver hoop earrings"]"""
+Look at the person and analyze:
+1. **Current Outfit Style**: What are they wearing RIGHT NOW? Is it casual, formal, streetwear, traditional, athleisure, minimalist, bold, preppy, etc.?
+2. **Fashion Vibe**: Do they look trendy, classic, edgy, relaxed, polished, sporty?
+3. **Body Language & Presentation**: Confident, casual, professional setting?
+4. **Visible Accessories**: Watch, jewelry, glasses, bags - what taste do they show?
+5. **Age Bracket & Energy**: Young trendy, mature professional, relaxed adult?
+6. **Color Patterns**: What colors are they currently wearing? Do they seem to prefer bold or muted?
+7. **Fit Preferences**: Are their clothes fitted, relaxed, oversized?{optional_context}
+
+**STEP 2: DEDUCE THEIR PERSONAL STYLE**
+
+Based on your visual analysis, determine:
+- What type of clothes would this SPECIFIC person actually buy?
+- What fits their apparent lifestyle and aesthetic?
+- What colors from the recommended palette suit their vibe?
+
+**STEP 3: GENERATE SEARCH KEYWORDS**
+
+Create 8-10 eBay search keywords that:
+1. Match THEIR style (not generic fashion advice)
+2. Use colors from the flattering palette above
+3. Include "{gender_suffix}" suffix for accurate eBay results
+4. Are specific enough for good search results (3-5 words each)
+
+**CRITICAL RULES:**
+- If they're wearing a casual t-shirt and jeans → suggest casual clothes, NOT suits
+- If they look like they prefer minimal/clean aesthetics → don't suggest loud prints
+- If they're dressed in traditional/ethnic wear → suggest similar items
+- If they look sporty/athletic → suggest athleisure
+- MATCH their energy and style - don't impose YOUR taste
+
+**WHAT TO AVOID:**
+- Generic "safe" recommendations that ignore their actual style
+- Suggesting formal wear to someone clearly dressed casually
+- Cultural stereotypes - an Indian person in a band t-shirt wants band t-shirts, not kurtas
+- Ignoring visible style cues in favor of profile data
+
+Output ONLY a JSON array of 8-10 search keywords. No explanation.
+
+Example - Person wearing casual streetwear (hoodie, sneakers):
+["black oversized hoodie mens", "navy cargo joggers men", "white chunky sneakers mens", "gray graphic tee men", "olive bomber jacket mens"]
+
+Example - Person in smart casual polo and chinos:
+["navy slim fit polo mens", "beige cotton chinos men", "brown leather loafers mens", "white oxford shirt men", "olive green sweater mens"]
+
+Example - Person in ethnic/traditional wear:
+["embroidered cotton kurta mens", "white linen kurta men", "beige churidar pants mens", "navy nehru jacket mens", "brown kolhapuri sandals mens"]"""
 
         # Retry loop with exponential backoff
         last_error = None
@@ -645,7 +727,7 @@ Example output:
         
         # All retries failed, use fallback
         logger.error(f"All Gemini API retries failed. Last error: {last_error}")
-        return self._get_fallback_keywords(color_recs)
+        return self._get_fallback_keywords(color_recs, gender, ethnicity, style)
     
     def _parse_keywords_from_response(self, text: str) -> List[str]:
         """Parse keywords from Gemini response, handling various formats."""
@@ -682,34 +764,62 @@ Example output:
             logger.error(f"Unexpected error parsing keywords: {e}")
             return []
     
-    def _get_fallback_keywords(self, color_recs: Optional[Dict] = None) -> List[str]:
-        """Return fallback keywords when Gemini API fails, using color recommendations if available."""
+    def _get_fallback_keywords(self, color_recs: Optional[Dict] = None, gender: str = None, ethnicity: str = None, style: str = None) -> List[str]:
+        """
+        Return simple fallback keywords when Gemini API fails.
+        Uses color theory but keeps clothing generic - no cultural assumptions.
+        The vision-based Gemini analysis is what handles personalization.
+        """
+        gender = (gender or '').lower()
+        
+        is_male = gender in ['male', 'man', 'men', 'masculine']
+        is_female = gender in ['female', 'woman', 'women', 'feminine']
+        
+        # Get colors from recommendations or use safe defaults
         if color_recs and color_recs.get('best_colors'):
-            best_colors = color_recs['best_colors'][:4]
-            neutrals = color_recs.get('neutrals', ['black', 'white'])[:2]
-            
+            colors = color_recs['best_colors'][:4]
+            neutrals = color_recs.get('neutrals', ['black', 'white', 'gray'])[:3]
+        else:
+            colors = ['navy', 'gray', 'olive', 'burgundy']
+            neutrals = ['black', 'white', 'beige']
+        
+        # Simple, universal clothing items with colors
+        if is_male:
             fallback = [
-                f"{best_colors[0]} dress shirt" if len(best_colors) > 0 else "navy dress shirt",
-                f"{best_colors[1]} blazer" if len(best_colors) > 1 else "black blazer",
-                f"{neutrals[0]} dress pants" if neutrals else "black dress pants",
-                f"{best_colors[2]} sweater" if len(best_colors) > 2 else "gray sweater",
-                "casual denim jeans",
-                f"{best_colors[3]} blouse" if len(best_colors) > 3 else "white blouse",
-                f"{neutrals[1]} casual pants" if len(neutrals) > 1 else "khaki pants",
-                "leather dress shoes"
+                f"{colors[0]} t-shirt mens",
+                f"{colors[1]} casual shirt men",
+                f"{neutrals[0]} chinos mens",
+                f"{colors[2]} hoodie men",
+                "denim jeans mens",
+                f"{colors[3]} sweater mens" if len(colors) > 3 else "gray sweater mens",
+                f"{neutrals[1]} sneakers men",
+                "casual jacket mens"
+            ]
+        elif is_female:
+            fallback = [
+                f"{colors[0]} top womens",
+                f"{colors[1]} blouse women",
+                f"{neutrals[0]} pants womens",
+                f"{colors[2]} cardigan women",
+                "denim jeans womens",
+                f"{colors[3]} dress womens" if len(colors) > 3 else "casual dress womens",
+                f"{neutrals[1]} sneakers women",
+                "casual jacket womens"
             ]
         else:
+            # Gender neutral
             fallback = [
-                "black dress pants",
-                "white button shirt", 
-                "navy blue blazer",
-                "casual denim jeans",
-                "leather dress shoes",
-                "casual sneakers",
-                "cotton t-shirt",
-                "summer dress"
+                f"{colors[0]} t-shirt",
+                f"{colors[1]} hoodie",
+                f"{neutrals[0]} joggers",
+                f"{colors[2]} sweater",
+                "denim jeans",
+                f"{neutrals[1]} sneakers",
+                "casual jacket",
+                "canvas bag"
             ]
-        logger.info(f"Using fallback keywords: {fallback}")
+        
+        logger.info(f"[FALLBACK KEYWORDS] Using simple color-based fallback: {fallback}")
         return fallback
     
     async def _search_ebay(self, query: str) -> List[Dict]:
@@ -746,6 +856,20 @@ Example output:
                 response = await self.http_client.get(url, headers=headers)
                 response.raise_for_status()
                 data = response.json()
+                
+                # Debug: Log the raw API response structure (first item only)
+                logger.debug(f"[EBAY RAW] Response keys: {list(data.keys()) if isinstance(data, dict) else 'not a dict'}")
+                if isinstance(data, dict):
+                    for key in ['results', 'items', 'searchResults']:
+                        if key in data and data[key]:
+                            sample_item = data[key][0] if isinstance(data[key], list) and len(data[key]) > 0 else None
+                            if sample_item:
+                                logger.info(f"[EBAY RAW] First item keys under '{key}': {list(sample_item.keys()) if isinstance(sample_item, dict) else type(sample_item)}")
+                                # Log image-related fields specifically
+                                for img_key in ['image', 'imageUrl', 'galleryURL', 'thumbnailUrl', 'picture', 'primaryImage']:
+                                    if img_key in sample_item:
+                                        logger.info(f"[EBAY RAW] {img_key} = {sample_item[img_key]}")
+                            break
                 
                 # Parse and rank products
                 products = self._parse_ebay_results(data, query)
@@ -841,14 +965,15 @@ Example output:
                     except:
                         continue
                 
-                # Fallback to placeholder if no image found
+                # If no image found, skip this item entirely - don't use placeholders
                 if not image_url:
-                    image_url = f'https://via.placeholder.com/400x500?text={query.replace(" ", "+")}'
+                    logger.warning(f"No image URL found for item, skipping: {item.get('title', 'unknown')[:50]}")
+                    continue
                 
                 # Upgrade image quality if possible (eBay allows size modification)
                 if image_url and 's-l' in image_url:
                     # Change thumbnail to larger image (s-l140 -> s-l500/s-l1600)
-                    image_url = image_url.replace('s-l140', 's-l500').replace('s-l225', 's-l500')
+                    image_url = image_url.replace('s-l140', 's-l500').replace('s-l225', 's-l500').replace('s-l300', 's-l500')
                 
                 # Extract price - try multiple structures
                 price_value = 0.0
@@ -996,18 +1121,23 @@ Example output:
         return score
     
     def _get_fallback_product(self, query: str) -> List[Dict]:
-        """Generate fallback product when API fails."""
+        """Generate fallback product when API fails - returns eBay search link without placeholder image."""
+        logger.warning(f"[FALLBACK] Using fallback product for query: {query}")
+        # Use a real eBay search URL - the frontend will handle the missing image gracefully
+        ebay_search_url = f"https://www.ebay.com/sch/i.html?_nkw={query.replace(' ', '+')}"
         return [{
-            "id": f"fallback_{hash(query)}",
-            "name": query.title(),
-            "image_url": "https://via.placeholder.com/400x600?text=" + query.replace(" ", "+"),
-            "price": 29.99,
+            "id": f"search_{hash(query)}",
+            "name": f"Search eBay: {query.title()}",
+            # Use eBay logo as fallback image - always available
+            "image_url": "https://ir.ebaystatic.com/pictures/aw/pics/s_1x2.gif",
+            "price": 0.0,
             "currency": "USD",
-            "category": query.split()[0].capitalize(),
-            "ebay_url": f"https://www.ebay.com/sch/i.html?_nkw={query.replace(' ', '+')}",
-            "condition": "New",
+            "category": query.split()[0].capitalize() if query.split() else "Fashion",
+            "ebay_url": ebay_search_url,
+            "condition": "Various",
             "shipping": 0,
-            "relevance_score": 50.0
+            "relevance_score": 25.0,
+            "is_search_fallback": True
         }]
     
     def _get_fallback_recommendations(self) -> List[Dict]:

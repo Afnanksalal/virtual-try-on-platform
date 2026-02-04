@@ -42,10 +42,13 @@ export default function RecommendationsTab({
 
   const handleImageError = (id: string) => {
     setFailedImages(prev => new Set([...prev, id]));
+    console.warn(`[Recommendations] Image failed to load for item: ${id}`);
   };
 
-  const getPlaceholderImage = (name: string) => {
-    return `https://via.placeholder.com/400x500/f3f4f6/374151?text=${encodeURIComponent(name.slice(0, 20))}`;
+  // Use a data URI for placeholder instead of external service
+  const getPlaceholderImage = () => {
+    // Simple gray placeholder with fashion icon as base64 SVG
+    return "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjUwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjNmNGY2Ii8+PHRleHQgeD0iNTAlIiB5PSI0NSUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjQ4IiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5G VPC90ZXh0Pjx0ZXh0IHg9IjUwJSIgeT0iNTUlIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzljYTNhZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+SW1hZ2UgVW5hdmFpbGFibGU8L3RleHQ+PC9zdmc+";
   };
 
   if (isLoading) {
@@ -131,7 +134,7 @@ export default function RecommendationsTab({
               <div className="relative aspect-[4/5] bg-gray-100 overflow-hidden">
                 <Image
                   src={failedImages.has(recommendation.id) 
-                    ? getPlaceholderImage(recommendation.name)
+                    ? getPlaceholderImage()
                     : recommendation.image_url
                   }
                   alt={`${recommendation.name} - ${recommendation.category}`}

@@ -16,6 +16,21 @@ interface Recommendation {
   ebay_url: string;
 }
 
+// Placeholder image as data URI - no external dependencies
+const PLACEHOLDER_IMAGE = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjNmNGY2Ii8+PHRleHQgeD0iNTAlIiB5PSI0NSUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjQ4IiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5GVPC90ZXh0Pjx0ZXh0IHg9IjUwJSIgeT0iNTUlIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzljYTNhZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+SW1hZ2UgVW5hdmFpbGFibGU8L3RleHQ+PC9zdmc+";
+
+export default function Recommendations() {
+  const [recs, setRecs] = useState<Recommendation[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Recommendation | null>(null);
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
+
+  const handleImageError = (id: string) => {
+    console.warn(`[Recommendations] Image failed to load for item: ${id}`);
+    setFailedImages(prev => new Set([...prev, id]));
+  };
+
 export default function Recommendations() {
   const [recs, setRecs] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -104,14 +119,16 @@ export default function Recommendations() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {recs.map((rec, i) => (
-              <div key={i} className="bg-white border border-gray-200 rounded-2xl p-4 hover:shadow-md transition-shadow">
+              <div key={rec.id || i} className="bg-white border border-gray-200 rounded-2xl p-4 hover:shadow-md transition-shadow">
                 <div className="aspect-square bg-gray-100 rounded-xl mb-3 overflow-hidden relative">
                   <Image 
-                    src={rec.image_url} 
+                    src={failedImages.has(rec.id) ? PLACEHOLDER_IMAGE : rec.image_url} 
                     alt={rec.name}
                     fill
                     sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
                     className="object-cover"
+                    unoptimized
+                    onError={() => handleImageError(rec.id)}
                   />
                 </div>
                 <div className="space-y-2">
