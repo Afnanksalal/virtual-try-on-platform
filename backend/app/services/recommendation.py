@@ -67,6 +67,26 @@ class CircuitBreaker:
             self.on_failure()
             raise e
     
+    async def async_call(self, coro_func, *args, **kwargs):
+        """Execute async function with circuit breaker protection."""
+        if self.state == "OPEN":
+            # Check if recovery timeout has passed
+            if self.last_failure_time and \
+               (datetime.now() - self.last_failure_time).seconds >= self.recovery_timeout:
+                logger.info(f"{self.name}: Attempting recovery (HALF_OPEN)")
+                self.state = "HALF_OPEN"
+            else:
+                logger.warning(f"{self.name}: Circuit OPEN, failing fast")
+                raise Exception(f"Circuit breaker {self.name} is OPEN")
+        
+        try:
+            result = await coro_func(*args, **kwargs)
+            self.on_success()
+            return result
+        except Exception as e:
+            self.on_failure()
+            raise e
+    
     def on_success(self):
         """Handle successful call."""
         if self.state == "HALF_OPEN":
@@ -476,8 +496,8 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
             return self._get_fallback_keywords(color_recs, gender, ethnicity, style)
         
         try:
-            return self.gemini_circuit_breaker.call(
-                self._extract_keywords_with_color_theory_sync,
+            return await self.gemini_circuit_breaker.async_call(
+                self._extract_keywords_with_color_theory,
                 collage,
                 user_profile,
                 skin_tone_info,
@@ -486,25 +506,6 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
         except Exception as e:
             logger.error(f"[GEMINI ERROR] API call failed: {e}")
             return self._get_fallback_keywords(color_recs, gender, ethnicity, style)
-    
-    def _extract_keywords_with_color_theory_sync(
-        self, 
-        collage: Image.Image, 
-        user_profile: Optional[Dict] = None,
-        skin_tone_info: Optional[Dict] = None,
-        color_recs: Optional[Dict] = None
-    ) -> List[str]:
-        """Synchronous version for circuit breaker."""
-        # This is a wrapper to make the async method work with circuit breaker
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(self._extract_keywords_with_color_theory(
-                collage, user_profile, skin_tone_info, color_recs
-            ))
-        finally:
-            loop.close()
     
     async def _search_ebay_with_circuit_breaker(self, query: str) -> List[Dict]:
         """Search eBay with circuit breaker protection."""
