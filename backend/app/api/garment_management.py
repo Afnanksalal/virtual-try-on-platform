@@ -100,7 +100,7 @@ async def upload_garment(
         logger.error(f"Storage error for user {user_id}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to upload garment: {e.reason}. Please try again."
+            detail=f"Failed to upload garment: {str(e)}. Please try again."
         )
     
     except Exception as e:
@@ -158,7 +158,7 @@ async def list_garments(
         logger.error(f"Storage error for user {user_id}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list garments: {e.reason}. Please try again."
+            detail=f"Failed to list garments: {str(e)}. Please try again."
         )
     
     except Exception as e:
@@ -226,7 +226,7 @@ async def delete_garment(
         logger.error(f"Storage error deleting garment {garment_id} for user {user_id}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to delete garment: {e.reason}. Please try again."
+            detail=f"Failed to delete garment: {str(e)}. Please try again."
         )
     
     except Exception as e:
