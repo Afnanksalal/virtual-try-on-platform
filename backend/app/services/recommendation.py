@@ -207,7 +207,7 @@ class RecommendationEngine:
         # API Keys
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.rapidapi_key = os.getenv("RAPIDAPI_KEY")
-        self.rapidapi_host = os.getenv("RAPIDAPI_HOST", "ebay-search-result.p.rapidapi.com")
+        self.rapidapi_host = os.getenv("RAPIDAPI_HOST", "ebay32.p.rapidapi.com")
         
         # Retry configuration
         self.max_retries = 3
@@ -823,16 +823,57 @@ Example - Person in ethnic/traditional wear:
         logger.info(f"[FALLBACK KEYWORDS] Using simple color-based fallback: {fallback}")
         return fallback
     
+    async def _fetch_product_details(self, item_id: str) -> Optional[Dict]:
+        """
+        Fetch full product details from eBay to get real images.
+        
+        Args:
+            item_id: eBay item/product ID
+            
+        Returns:
+            Product details dict with images array, or None on failure
+        """
+        url = f"https://{self.rapidapi_host}/product/{item_id}?country=us"
+        
+        headers = {
+            "X-RapidAPI-Key": self.rapidapi_key,
+            "X-RapidAPI-Host": self.rapidapi_host
+        }
+        
+        try:
+            response = await self.http_client.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Extract images array from product details
+            images = data.get('images', [])
+            if images and isinstance(images, list) and len(images) > 0:
+                logger.debug(f"[PRODUCT DETAILS] Got {len(images)} images for item {item_id}")
+                return {
+                    'images': images,
+                    'title': data.get('title', ''),
+                    'price': data.get('price', {}),
+                    'condition': data.get('condition', 'Unknown'),
+                    'item_id': item_id
+                }
+            else:
+                logger.warning(f"[PRODUCT DETAILS] No images in response for item {item_id}")
+                return None
+                
+        except Exception as e:
+            logger.warning(f"[PRODUCT DETAILS] Failed to fetch details for {item_id}: {e}")
+            return None
+    
     async def _search_ebay(self, query: str) -> List[Dict]:
         """
         Search eBay using RapidAPI with retry logic and ranking.
-        Uses httpx AsyncClient with connection pooling.
+        Now fetches product details for each item to get real images.
         
         Args:
             query: Search query string
             
         Returns:
-            List of product dictionaries with ranking by relevance
+            List of product dictionaries with real images
         """
         if not self.rapidapi_key:
             logger.warning("RapidAPI key not configured, using fallback")
@@ -858,29 +899,75 @@ Example - Person in ethnic/traditional wear:
                 response.raise_for_status()
                 data = response.json()
                 
-                # Debug: Log the raw API response structure (first item only)
-                logger.debug(f"[EBAY RAW] Response keys: {list(data.keys()) if isinstance(data, dict) else 'not a dict'}")
-                if isinstance(data, dict):
-                    for key in ['results', 'items', 'searchResults']:
-                        if key in data and data[key]:
-                            sample_item = data[key][0] if isinstance(data[key], list) and len(data[key]) > 0 else None
-                            if sample_item:
-                                logger.info(f"[EBAY RAW] First item keys under '{key}': {list(sample_item.keys()) if isinstance(sample_item, dict) else type(sample_item)}")
-                                # Log image-related fields specifically
-                                for img_key in ['image', 'imageUrl', 'galleryURL', 'thumbnailUrl', 'picture', 'primaryImage']:
-                                    if img_key in sample_item:
-                                        logger.info(f"[EBAY RAW] {img_key} = {sample_item[img_key]}")
-                            break
+                # Log response structure for debugging
+                logger.debug(f"[EBAY SEARCH] Response type: {type(data)}, keys: {list(data.keys()) if isinstance(data, dict) else 'N/A'}")
                 
-                # Parse and rank products
-                products = self._parse_ebay_results(data, query)
+                # Parse search results to get item IDs and basic info
+                search_items = self._parse_search_results(data, query)
+                
+                if not search_items:
+                    logger.warning(f"No items found in search for '{query}'")
+                    return self._get_fallback_product(query)
+                
+                logger.info(f"Found {len(search_items)} items, fetching product details for images...")
+                
+                # Fetch product details for top 3 items to get real images
+                products = []
+                for item in search_items[:3]:  # Limit to top 3 to avoid rate limiting
+                    item_id = item.get('id')
+                    if not item_id:
+                        continue
+                    
+                    # Fetch full product details
+                    details = await self._fetch_product_details(item_id)
+                    
+                    if details and details.get('images'):
+                        # Use first image from product details
+                        image_url = details['images'][0]
+                        
+                        # Build product with real image
+                        product = {
+                            "id": str(item_id),
+                            "name": details.get('title') or item.get('title', query),
+                            "image_url": image_url,
+                            "price": details.get('price', {}).get('value', item.get('price', 0)),
+                            "currency": details.get('price', {}).get('currency', 'USD'),
+                            "category": self._extract_category_from_query(query),
+                            "ebay_url": f"https://www.ebay.com/itm/{item_id}",
+                            "condition": details.get('condition', 'Unknown'),
+                            "shipping": 0.0,
+                            "search_query": query,
+                        }
+                        product['relevance_score'] = self._calculate_relevance(product, query)
+                        products.append(product)
+                        logger.info(f"[PRODUCT] {product['name'][:50]}... | ${product['price']} | img: {image_url[:60]}...")
+                    else:
+                        # Fallback: use search result image if product details failed
+                        if item.get('image_url'):
+                            product = {
+                                "id": str(item_id),
+                                "name": item.get('title', query),
+                                "image_url": item.get('image_url'),
+                                "price": item.get('price', 0),
+                                "currency": "USD",
+                                "category": self._extract_category_from_query(query),
+                                "ebay_url": f"https://www.ebay.com/itm/{item_id}",
+                                "condition": "Unknown",
+                                "shipping": 0.0,
+                                "search_query": query,
+                            }
+                            product['relevance_score'] = self._calculate_relevance(product, query)
+                            products.append(product)
+                    
+                    # Small delay between product detail requests to avoid rate limiting
+                    await asyncio.sleep(0.2)
                 
                 if products:
-                    logger.info(f"Found {len(products)} products for '{query}'")
+                    logger.info(f"Returning {len(products)} products with real images for '{query}'")
                     self.ebay_circuit_breaker.on_success()
                     return products
                 else:
-                    logger.warning(f"No products found for '{query}'")
+                    logger.warning(f"No products with valid images for '{query}'")
                     return self._get_fallback_product(query)
                     
             except httpx.TimeoutException:
@@ -911,162 +998,98 @@ Example - Person in ethnic/traditional wear:
         self.ebay_circuit_breaker.on_failure()
         return self._get_fallback_product(query)
     
-    def _parse_ebay_results(self, data: Dict, query: str) -> List[Dict]:
+    def _parse_search_results(self, data: Dict, query: str) -> List[Dict]:
         """
-        Parse eBay API results and rank by relevance.
-        Enhanced to extract more data and better images.
+        Parse eBay search results to extract item IDs and basic info.
         
         Args:
-            data: Raw eBay API response
-            query: Original search query for relevance scoring
+            data: Raw eBay search API response
+            query: Original search query
             
         Returns:
-            List of parsed and ranked products
+            List of items with id, title, and optional image_url
         """
-        products = []
-        results = data.get('results', [])
+        items = []
         
-        # Also check alternative response structures
-        if not results:
-            results = data.get('items', [])
-        if not results:
-            results = data.get('searchResults', [])
-        if not results:
-            results = data.get('findItemsAdvancedResponse', [{}])[0].get('searchResult', [{}])[0].get('item', [])
+        # Handle different response structures
+        results = data.get('results', []) or data.get('items', []) or data.get('searchResults', [])
         
-        logger.info(f"Parsing {len(results)} eBay results for query '{query}'")
+        # ebay32 API specific: check for 'products' key
+        if not results and 'products' in data:
+            results = data['products']
         
-        for item in results[:15]:  # Increased to top 15 results for better selection
+        logger.debug(f"[PARSE SEARCH] Found {len(results)} results")
+        
+        for item in results[:10]:  # Get top 10 for selection
             try:
-                # Extract image URL - try multiple possible paths (comprehensive)
-                image_url = None
+                # Extract item ID - try multiple field names
+                item_id = (
+                    item.get('itemId') or 
+                    item.get('id') or 
+                    item.get('epid') or 
+                    item.get('productId') or
+                    item.get('legacyItemId')
+                )
                 
-                # Try different image field locations
-                image_paths = [
-                    lambda i: i.get('image', {}).get('imageUrl'),
-                    lambda i: i.get('image', {}).get('url'),
-                    lambda i: i.get('image') if isinstance(i.get('image'), str) else None,
-                    lambda i: i.get('imageUrl'),
-                    lambda i: i.get('galleryURL'),
-                    lambda i: i.get('pictureURLLarge'),
-                    lambda i: i.get('pictureURLSuperSize'),
-                    lambda i: i.get('thumbnailUrl'),
-                    lambda i: (i.get('thumbnailImages', [{}])[0].get('imageUrl') if i.get('thumbnailImages') else None),
-                    lambda i: (i.get('additionalImages', [{}])[0].get('imageUrl') if i.get('additionalImages') else None),
-                    lambda i: i.get('primaryImage', {}).get('imageUrl'),
-                    lambda i: (i.get('galleryInfo', {}).get('galleryURL', [None])[0] if i.get('galleryInfo') else None),
-                ]
-                
-                for path_fn in image_paths:
-                    try:
-                        url = path_fn(item)
-                        if url and isinstance(url, str) and url.startswith('http'):
-                            image_url = url
-                            break
-                    except:
-                        continue
-                
-                # If no image found, skip this item entirely - don't use placeholders
-                if not image_url:
-                    logger.warning(f"No image URL found for item, skipping: {item.get('title', 'unknown')[:50]}")
+                if not item_id:
                     continue
-                
-                # Upgrade image quality if possible (eBay allows size modification)
-                if image_url and 's-l' in image_url:
-                    # Change thumbnail to larger image (s-l140 -> s-l500/s-l1600)
-                    image_url = image_url.replace('s-l140', 's-l500').replace('s-l225', 's-l500').replace('s-l300', 's-l500')
-                
-                # Extract price - try multiple structures
-                price_value = 0.0
-                price_currency = 'USD'
-                
-                if isinstance(item.get('price'), dict):
-                    price_value = float(item['price'].get('value', 0))
-                    price_currency = item['price'].get('currency', 'USD')
-                elif isinstance(item.get('price'), (int, float)):
-                    price_value = float(item['price'])
-                elif item.get('sellingStatus'):
-                    price_value = float(item['sellingStatus'][0].get('currentPrice', [{}])[0].get('__value__', 0))
-                    price_currency = item['sellingStatus'][0].get('currentPrice', [{}])[0].get('@currencyId', 'USD')
                 
                 # Extract title
                 title = item.get('title', query)
                 if isinstance(title, list):
                     title = title[0] if title else query
                 
-                # Extract item ID
-                item_id = item.get('itemId', '') or item.get('id', '') or f"item_{hash(title)}"
-                if isinstance(item_id, list):
-                    item_id = item_id[0] if item_id else f"item_{hash(title)}"
+                # Extract image (might be low quality, but useful as fallback)
+                image_url = None
+                for key in ['image', 'imageUrl', 'thumbnailUrl', 'galleryURL']:
+                    if key in item:
+                        img = item[key]
+                        if isinstance(img, dict):
+                            image_url = img.get('imageUrl') or img.get('url')
+                        elif isinstance(img, str):
+                            image_url = img
+                        if image_url:
+                            break
                 
-                # Extract URL
-                item_url = item.get('itemWebUrl', '') or item.get('viewItemURL', '')
-                if isinstance(item_url, list):
-                    item_url = item_url[0] if item_url else ''
-                if not item_url:
-                    item_url = f"https://www.ebay.com/sch/i.html?_nkw={query.replace(' ', '+')}"
+                # Extract price
+                price = 0
+                if isinstance(item.get('price'), dict):
+                    price = item['price'].get('value', 0)
+                elif isinstance(item.get('price'), (int, float)):
+                    price = item['price']
                 
-                # Extract condition
-                condition = 'Unknown'
-                if isinstance(item.get('condition'), str):
-                    condition = item['condition']
-                elif isinstance(item.get('condition'), dict):
-                    condition = item['condition'].get('conditionDisplayName', 'Unknown')
-                elif item.get('conditionDisplayName'):
-                    condition = item['conditionDisplayName']
-                
-                # Extract shipping info
-                shipping_cost = 0.0
-                shipping_info = item.get('shippingOptions', []) or item.get('shippingInfo', [])
-                if shipping_info:
-                    if isinstance(shipping_info, list) and len(shipping_info) > 0:
-                        ship_item = shipping_info[0]
-                        if isinstance(ship_item, dict):
-                            ship_cost = ship_item.get('shippingCost', {})
-                            if isinstance(ship_cost, dict):
-                                shipping_cost = float(ship_cost.get('value', 0))
-                            elif isinstance(ship_cost, list) and len(ship_cost) > 0:
-                                shipping_cost = float(ship_cost[0].get('__value__', 0))
-                
-                # Build product dictionary
-                product = {
-                    "id": str(item_id),
-                    "name": str(title)[:200],  # Limit title length
-                    "image_url": image_url,
-                    "price": price_value,
-                    "currency": price_currency,
-                    "category": self._extract_category(item, query),
-                    "ebay_url": item_url,
-                    "condition": condition,
-                    "shipping": shipping_cost,
-                    "search_query": query,  # Added for reference
-                }
-                
-                # Calculate relevance score
-                product['relevance_score'] = self._calculate_relevance(product, query)
-                
-                products.append(product)
+                items.append({
+                    'id': str(item_id),
+                    'title': str(title),
+                    'image_url': image_url,
+                    'price': float(price) if price else 0
+                })
                 
             except Exception as e:
-                logger.warning(f"Failed to parse eBay item: {e}")
+                logger.warning(f"Failed to parse search item: {e}")
                 continue
         
-        # Sort by relevance score (highest first)
-        products.sort(key=lambda x: x['relevance_score'], reverse=True)
-        
-        logger.info(f"Parsed {len(products)} valid products from eBay results")
-        return products[:5]  # Return top 5 most relevant (increased from 3)
+        return items
     
-    def _extract_category(self, item: Dict, query: str) -> str:
-        """Extract or infer product category."""
-        # Try to get category from item
-        category = item.get('categories', [{}])[0].get('categoryName', '')
+    def _extract_category_from_query(self, query: str) -> str:
+        """Extract category from search query."""
+        # Common clothing categories
+        categories = {
+            'shirt': 'Shirts', 'tshirt': 'T-Shirts', 't-shirt': 'T-Shirts',
+            'polo': 'Polos', 'jacket': 'Jackets', 'hoodie': 'Hoodies',
+            'sweater': 'Sweaters', 'jeans': 'Jeans', 'pants': 'Pants',
+            'chinos': 'Pants', 'shorts': 'Shorts', 'sneakers': 'Shoes',
+            'shoes': 'Shoes', 'boots': 'Shoes', 'blazer': 'Blazers',
+            'coat': 'Coats', 'dress': 'Dresses', 'skirt': 'Skirts',
+            'blouse': 'Tops', 'cardigan': 'Knitwear'
+        }
         
-        if not category:
-            # Infer from query
-            category = query.split()[0].capitalize()
+        query_lower = query.lower()
+        for keyword, category in categories.items():
+            if keyword in query_lower:
+                return category
         
-        return category
+        return query.split()[0].capitalize() if query else 'Clothing'
     
     def _calculate_relevance(self, product: Dict, query: str) -> float:
         """
