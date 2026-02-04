@@ -23,17 +23,20 @@ logger.info(f"Environment loaded - GEMINI_API_KEY: {'✓ Set' if os.getenv('GEMI
 async def lifespan(app: FastAPI):
     """Startup and shutdown hooks."""
     # Startup
+    logger.info("=" * 60)
     logger.info("Starting Virtual Try-On ML API...")
+    logger.info("=" * 60)
     
     # Log GPU status
     gpu_available = torch.cuda.is_available()
     device = torch.cuda.get_device_name(0) if gpu_available else "CPU"
     logger.info(f"Compute device: {device}")
     
-    # Preload ML models
+    # Preload ML models (includes checkpoint download on first run)
     from ml_engine.loader import model_loader
     try:
         logger.info("Preloading ML models...")
+        logger.info("Note: On first run, this will download Leffa checkpoints (several GB)")
         await model_loader.preload_models()
         logger.info("ML models preloaded successfully")
         
@@ -48,6 +51,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to preload/warmup models: {e}", exc_info=True)
         logger.warning("API will start but models will be loaded on first request")
+    
+    logger.info("=" * 60)
+    logger.info("Virtual Try-On ML API is ready!")
+    logger.info("=" * 60)
     
     yield
     
@@ -109,8 +116,10 @@ async def root():
 @app.get("/health")
 async def health_check():
     """
-    ML service health check - GPU, AI services, environment
+    ML service health check - GPU, AI services, Leffa, environment
     """
+    from ml_engine.loader import model_loader, LEFFA_AVAILABLE, LEFFA_PATH
+    
     health_status = {
         "status": "healthy",
         "service": "ml-api",
@@ -125,7 +134,18 @@ async def health_check():
         "device": device_name
     }
     
-    # 2. Gemini API Key Check (for recommendations)
+    # 2. Leffa Virtual Try-On Check
+    leffa_status = {
+        "available": LEFFA_AVAILABLE,
+        "path": LEFFA_PATH,
+        "loaded": "tryon" in model_loader.models
+    }
+    health_status["checks"]["leffa"] = leffa_status
+    if not LEFFA_AVAILABLE:
+        logger.warning("Leffa not available - virtual try-on will fail")
+        health_status["status"] = "degraded"
+    
+    # 3. Gemini API Key Check (for recommendations)
     gemini_key = os.getenv("GEMINI_API_KEY")
     health_status["checks"]["ai_service"] = {
         "configured": bool(gemini_key),
@@ -135,11 +155,14 @@ async def health_check():
         logger.warning("GEMINI_API_KEY not configured - recommendations will fail")
         health_status["status"] = "degraded"
     
-    # 3. Environment Check
+    # 4. Environment Check
     health_status["checks"]["environment"] = {
         "log_level": os.getenv("LOG_LEVEL", "INFO"),
         "cors_origins": len(origins)
     }
+    
+    # 5. Memory usage
+    health_status["checks"]["memory"] = model_loader.get_memory_usage()
     
     logger.info(f"Health check performed: {health_status['status']}")
     return health_status

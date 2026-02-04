@@ -55,8 +55,14 @@ export interface TryOnResponse {
   result_url: string;
   processing_time: number;
   metadata: {
-    model: string;
-    resolution: string;
+    garment_type: GarmentType;
+    num_inference_steps: number;
+    guidance_scale: number;
+    seed: number;
+    result_dimensions: {
+      width: number;
+      height: number;
+    };
   };
 }
 
@@ -124,6 +130,9 @@ export interface ImageAnalysis {
   };
 }
 
+// Garment Types - matching Leffa's supported categories
+export type GarmentType = 'upper_body' | 'lower_body' | 'dresses';
+
 // Body Parameters Types
 export interface BodyParameters {
   ethnicity: string;
@@ -150,7 +159,7 @@ export interface StorageObject {
   updated_at: string;
   created_at: string;
   last_accessed_at: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 // Health Check Types

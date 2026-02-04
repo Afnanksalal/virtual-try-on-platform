@@ -6,7 +6,8 @@ import type {
   Recommendation, 
   ImageAnalysis, 
   BodyParameters,
-  StorageObject 
+  StorageObject,
+  GarmentType 
 } from './types';
 
 // Type definitions
@@ -180,10 +181,23 @@ export const endpoints = {
     return api.post("/api/v1/recommend", formData);
   },
 
-  processTryOn: (userImage: File, garmentImage: File): Promise<TryOnResponse> => {
+  processTryOn: (
+    userImage: File, 
+    garmentImage: File, 
+    options?: {
+      garment_type?: GarmentType;
+      num_inference_steps?: number;
+      guidance_scale?: number;
+      seed?: number;
+    }
+  ): Promise<TryOnResponse> => {
     const formData = new FormData();
     formData.append("user_image", userImage);
     formData.append("garment_image", garmentImage);
+    formData.append("garment_type", options?.garment_type || "upper_body");
+    formData.append("num_inference_steps", String(options?.num_inference_steps || 30));
+    formData.append("guidance_scale", String(options?.guidance_scale || 2.5));
+    formData.append("seed", String(options?.seed || 42));
     return api.post("/api/v1/process-tryon", formData);
   },
 
@@ -330,7 +344,16 @@ export const endpoints = {
   },
 
   // Try-On Operations
-  generateTryOn: async (personalImageUrl: string, garmentUrl: string): Promise<TryOnResult> => {
+  generateTryOn: async (
+    personalImageUrl: string, 
+    garmentUrl: string,
+    options?: {
+      garment_type?: GarmentType;
+      num_inference_steps?: number;
+      guidance_scale?: number;
+      seed?: number;
+    }
+  ): Promise<TryOnResult> => {
     return withRetry(
       async () => {
         // Fetch images from URLs
@@ -347,7 +370,7 @@ export const endpoints = {
         const personalFile = new File([personalBlob], 'personal.jpg', { type: personalBlob.type });
         const garmentFile = new File([garmentBlob], 'garment.jpg', { type: garmentBlob.type });
 
-        const response = await endpoints.processTryOn(personalFile, garmentFile);
+        const response = await endpoints.processTryOn(personalFile, garmentFile, options);
 
         return {
           id: `tryon-${Date.now()}`,

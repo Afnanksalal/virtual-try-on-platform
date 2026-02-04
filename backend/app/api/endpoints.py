@@ -145,10 +145,22 @@ async def get_recommendations(
 async def process_virtual_tryon(
     user_image: UploadFile = File(...),
     garment_image: UploadFile = File(...),
+    garment_type: str = Form("upper_body"),  # "upper_body", "lower_body", or "dresses"
+    num_inference_steps: int = Form(30),
+    guidance_scale: float = Form(2.5),
+    seed: int = Form(42),
 ):
     """
-    Process virtual try-on using CatVTON model.
+    Process virtual try-on using Leffa model.
     ALL files stored in Supabase ONLY.
+    
+    Args:
+        user_image: User/person image file
+        garment_image: Garment image file
+        garment_type: Type of garment - "upper_body", "lower_body", or "dresses"
+        num_inference_steps: Number of diffusion steps (default: 30)
+        guidance_scale: CFG scale (default: 2.5)
+        seed: Random seed for reproducibility (default: 42)
     
     Returns:
         - request_id: Unique request identifier
@@ -192,18 +204,16 @@ async def process_virtual_tryon(
         
         logger.info(f"Uploaded input images to Supabase: {user_url}, {garment_url}")
         
-        # Process try-on with CatVTON
+        # Process try-on with Leffa
         result = tryon_service.process_tryon(
             person_image=user_img,
             garment_image=garment_img,
             request_id=request_id,
             options={
-                "garment_description": "upper",  # "upper", "lower", or "overall"
-                "num_inference_steps": 50,  # CatVTON default
-                "guidance_scale": 2.5,  # CatVTON recommended CFG
-                "seed": 42,
-                "width": 768,
-                "height": 1024,
+                "garment_type": garment_type,  # "upper_body", "lower_body", or "dresses"
+                "num_inference_steps": num_inference_steps,
+                "guidance_scale": guidance_scale,
+                "seed": seed,
             }
         )
         

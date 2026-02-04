@@ -1,52 +1,107 @@
-# Core
+# =============================================================================
+# Leffa Virtual Try-On Platform - Requirements
+# Python 3.10.16 Compatible
+# Based on: https://github.com/franciszzj/Leffa (pinned for stability)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core Web Framework
+# -----------------------------------------------------------------------------
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.5
 python-multipart==0.0.20
 
-# ML/AI - PyTorch Stack (Python 3.10.12 compatible)
-torch==2.4.0
-torchvision==0.19.0
-accelerate==0.31.0
+# -----------------------------------------------------------------------------
+# PyTorch Stack (MUST install first with CUDA matching your system)
+# For CUDA 11.8:
+#   pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu118
+# For CUDA 12.1:
+#   pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+# -----------------------------------------------------------------------------
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1
+
+# xformers must match torch version exactly
+xformers==0.0.28.post3
+
+# triton pinned for xformers compatibility
+triton==3.1.0
+
+# -----------------------------------------------------------------------------
+# Leffa Core Dependencies (pinned stable versions)
+# -----------------------------------------------------------------------------
+accelerate==1.2.1
+diffusers==0.32.2
+huggingface_hub==0.28.1
+transformers==4.47.1
 safetensors==0.4.5
-xformers==0.0.29.post1
-huggingface-hub==0.25.0
-transformers==4.46.3
-timm==0.6.7
-
-# Diffusers (CatVTON requires latest from git)
-git+https://github.com/huggingface/diffusers.git
-
-# CatVTON Dependencies
-omegaconf==2.3.0
 peft==0.14.0
-fvcore==0.1.5.post20221221
-cloudpickle==3.0.0
-pycocotools==2.0.8
-av==12.3.0
-gradio==4.41.0
 
+# -----------------------------------------------------------------------------
+# Human Parsing & Pose (Leffa preprocessors)
+# -----------------------------------------------------------------------------
+onnxruntime==1.20.1
+# Use onnxruntime-gpu only if you have CUDA, otherwise comment out:
+# onnxruntime-gpu==1.20.1
+
+# timm pinned for controlnet-aux compatibility
+timm==0.6.7
+controlnet-aux==0.0.9
+
+# -----------------------------------------------------------------------------
 # Image Processing
-pillow==10.3.0
+# -----------------------------------------------------------------------------
+pillow==10.4.0
 numpy==1.26.4
-scipy==1.13.1
+scipy==1.14.1
 opencv-python==4.10.0.84
 scikit-image==0.24.0
-matplotlib==3.9.1
-filetype==1.2.0
-tqdm==4.66.4
+matplotlib==3.10.0
+imageio==2.36.1
 
-# AI Services
+# -----------------------------------------------------------------------------
+# Leffa Additional Dependencies
+# -----------------------------------------------------------------------------
+einops==0.8.0
+omegaconf==2.3.0
+fvcore==0.1.5.post20221221
+cloudpickle==3.1.0
+pycocotools==2.0.8
+pandas==2.2.3
+psutil==6.1.0
+regex==2024.5.15
+torchmetrics==1.6.0
+tokenizers==0.21.0
+av==13.1.0
+tqdm==4.67.1
+
+# -----------------------------------------------------------------------------
+# AI Services & APIs
+# google-genai is the new official SDK (replaces google-generativeai)
+# -----------------------------------------------------------------------------
 google-genai==1.10.0
 
-# Supabase
+# -----------------------------------------------------------------------------
+# Supabase Storage
+# -----------------------------------------------------------------------------
 supabase==2.14.0
 
-# Development
+# -----------------------------------------------------------------------------
+# Development & Utilities
+# -----------------------------------------------------------------------------
 python-dotenv==1.0.1
-einops==0.8.0
 httpx[http2]==0.28.1
 requests==2.32.3
 slowapi==0.1.9
-PyYAML==6.0.1
-setuptools==51.0.0
+PyYAML==6.0.2
+setuptools==75.8.0
+filetype==1.2.0
+
+# -----------------------------------------------------------------------------
+# Gradio (for standalone Leffa app.py testing)
+# gradio 5.x supports websockets>=13, compatible with google-genai
+# -----------------------------------------------------------------------------
+gradio==5.9.1
+gradio-client==1.5.2

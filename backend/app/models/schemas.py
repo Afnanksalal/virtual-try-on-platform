@@ -30,11 +30,10 @@ class Gender(str, Enum):
     PREFER_NOT_TO_SAY = "prefer_not_to_say"
 
 class ClothingCategory(str, Enum):
+    """Garment types matching Leffa's supported categories."""
     UPPER_BODY = "upper_body"
     LOWER_BODY = "lower_body"
-    FULL_BODY = "full_body"
-    DRESS = "dress"
-    OUTERWEAR = "outerwear"
+    DRESSES = "dresses"
 
 # User schemas
 class UserCreate(StrictBaseModel):

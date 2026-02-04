@@ -14,12 +14,18 @@ logger = get_logger("api.image_analysis")
 # Initialize file validator
 file_validator = FileValidator(max_size_mb=10)
 
+# Gemini client singleton
+_gemini_client = None
+
 def get_gemini_client():
     """Get Gemini client, initializing if needed."""
+    global _gemini_client
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
         return None
-    return genai.Client(api_key=gemini_key)
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=gemini_key)
+    return _gemini_client
 
 @router.post("/analyze-image")
 async def analyze_image(image: UploadFile = File(...)):
@@ -28,8 +34,8 @@ async def analyze_image(image: UploadFile = File(...)):
     Returns: {"type": "head_only" | "full_body", "confidence": 0-1}
     """
     try:
-        gemini_client = get_gemini_client()
-        if not gemini_client:
+        client = get_gemini_client()
+        if not client:
             logger.error("GEMINI_API_KEY not configured")
             raise HTTPException(500, "GEMINI_API_KEY not configured")
         
@@ -57,8 +63,8 @@ Be strict: if you can't see at least the torso and upper legs, it's "head_only".
         img.save(img_byte_arr, format='PNG')
         img_byte_arr.seek(0)
         
-        # Use new Gemini SDK with inline image data
-        response = gemini_client.models.generate_content(
+        # Use google-genai SDK with inline image data
+        response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[
                 types.Part.from_text(text=prompt),
