@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { endpoints } from '@/lib/api';
 import { handleError } from '@/lib/errorHandling';
 import { useStorageSync, broadcastStorageChange } from '@/hooks/useStorageSync';
-import type { Garment, TryOnResult, Recommendation } from '@/lib/types';
+import type { Garment, TryOnResult, Recommendation, TryOnOptions } from '@/lib/types';
 
 interface PersonalImage {
   url: string;
@@ -31,6 +31,7 @@ interface StudioContextState {
   tryOnResults: TryOnResult[];
   recommendations: Recommendation[];
   selectedGarment: Garment | null;
+  tryOnOptions: TryOnOptions;
   
   // Loading states
   isLoadingPersonalImage: boolean;
@@ -64,6 +65,10 @@ interface StudioContextActions {
   // Personal image actions
   setPersonalImage: (image: PersonalImage | null) => void;
   
+  // Try-on options actions
+  setTryOnOptions: (options: TryOnOptions) => void;
+  updateTryOnOption: <K extends keyof TryOnOptions>(key: K, value: TryOnOptions[K]) => void;
+  
   // State persistence
   saveState: () => Promise<void>;
   loadState: () => Promise<void>;
@@ -93,6 +98,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     tryOnResults: [],
     recommendations: [],
     selectedGarment: null,
+    tryOnOptions: {
+      garment_type: 'upper_body',
+      model_type: 'viton_hd',
+      num_inference_steps: 30,
+      guidance_scale: 2.5,
+      ref_acceleration: false,
+      repaint: false,
+    },
     isLoadingPersonalImage: false,
     isLoadingGarments: false,
     isGenerating: false,
@@ -328,6 +341,17 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     setState(prev => ({ ...prev, personalImage: image }));
   }, []);
 
+  const setTryOnOptions = useCallback((options: TryOnOptions) => {
+    setState(prev => ({ ...prev, tryOnOptions: options }));
+  }, []);
+
+  const updateTryOnOption = useCallback(<K extends keyof TryOnOptions>(key: K, value: TryOnOptions[K]) => {
+    setState(prev => ({
+      ...prev,
+      tryOnOptions: { ...prev.tryOnOptions, [key]: value },
+    }));
+  }, []);
+
   const saveState = useCallback(async () => {
     await savePersistedState();
   }, [state.userId, state.selectedGarment, state.hasRequestedRecommendations]);
@@ -350,6 +374,8 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
     setIsLoadingRecommendations,
     setHasRequestedRecommendations,
     setPersonalImage,
+    setTryOnOptions,
+    updateTryOnOption,
     saveState,
     loadState,
   };

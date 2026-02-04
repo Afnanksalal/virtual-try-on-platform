@@ -624,9 +624,23 @@ CRITICAL: Output ONLY the JSON object, no markdown or other text."""
 
         prompt = f"""You are an expert fashion stylist with exceptional visual analysis skills.
 
-**YOUR PRIMARY TASK:** Analyze the person in this image and recommend clothes they would ACTUALLY like based on what you SEE.
+**YOUR PRIMARY TASK:** Analyze the person in this image and recommend CLOTHING they would ACTUALLY like based on what you SEE.
 
 {color_theory_context}
+
+**CRITICAL CONSTRAINT - VIRTUAL TRY-ON COMPATIBLE ITEMS ONLY:**
+This is for a virtual try-on system. You may ONLY recommend:
+✅ TOPS: t-shirts, shirts, blouses, polos, hoodies, sweaters, cardigans, jackets, coats, blazers, crop tops, tank tops, kurtas, tunics
+✅ BOTTOMS: pants, jeans, trousers, chinos, joggers, shorts, skirts, leggings, cargo pants, dress pants
+✅ DRESSES/FULL: dresses, jumpsuits, rompers, overalls, sarees, gowns
+
+❌ ABSOLUTELY DO NOT RECOMMEND:
+- Shoes, sneakers, boots, heels, sandals, loafers (NO FOOTWEAR)
+- Caps, hats, beanies (NO HEADWEAR)
+- Watches, jewelry, sunglasses, glasses (NO ACCESSORIES)
+- Bags, purses, backpacks (NO BAGS)
+- Belts, scarves, gloves (NO ACCESSORIES)
+- Any non-clothing items
 
 **STEP 1: VISUAL ANALYSIS (Most Important - Study the image carefully)**
 
@@ -634,49 +648,43 @@ Look at the person and analyze:
 1. **Current Outfit Style**: What are they wearing RIGHT NOW? Is it casual, formal, streetwear, traditional, athleisure, minimalist, bold, preppy, etc.?
 2. **Fashion Vibe**: Do they look trendy, classic, edgy, relaxed, polished, sporty?
 3. **Body Language & Presentation**: Confident, casual, professional setting?
-4. **Visible Accessories**: Watch, jewelry, glasses, bags - what taste do they show?
-5. **Age Bracket & Energy**: Young trendy, mature professional, relaxed adult?
-6. **Color Patterns**: What colors are they currently wearing? Do they seem to prefer bold or muted?
-7. **Fit Preferences**: Are their clothes fitted, relaxed, oversized?{optional_context}
+4. **Age Bracket & Energy**: Young trendy, mature professional, relaxed adult?
+5. **Color Patterns**: What colors are they currently wearing? Do they seem to prefer bold or muted?
+6. **Fit Preferences**: Are their clothes fitted, relaxed, oversized?{optional_context}
 
 **STEP 2: DEDUCE THEIR PERSONAL STYLE**
 
 Based on your visual analysis, determine:
-- What type of clothes would this SPECIFIC person actually buy?
+- What type of CLOTHING (tops/bottoms/dresses) would this person buy?
 - What fits their apparent lifestyle and aesthetic?
 - What colors from the recommended palette suit their vibe?
 
 **STEP 3: GENERATE SEARCH KEYWORDS**
 
-Create 8-10 eBay search keywords that:
+Create 8-10 search keywords for CLOTHING ONLY:
 1. Match THEIR style (not generic fashion advice)
 2. Use colors from the flattering palette above
-3. Include "{gender_suffix}" suffix for accurate eBay results
-4. Are specific enough for good search results (3-5 words each)
+3. Include "{gender_suffix}" suffix for accurate search results
+4. ONLY tops, bottoms, or dresses - nothing else!
 
 **CRITICAL RULES:**
-- If they're wearing a casual t-shirt and jeans → suggest casual clothes, NOT suits
+- If they're wearing a casual t-shirt and jeans → suggest casual tops and pants, NOT shoes
 - If they look like they prefer minimal/clean aesthetics → don't suggest loud prints
-- If they're dressed in traditional/ethnic wear → suggest similar items
-- If they look sporty/athletic → suggest athleisure
+- If they're dressed in traditional/ethnic wear → suggest similar CLOTHING items
+- If they look sporty/athletic → suggest athleisure CLOTHING
 - MATCH their energy and style - don't impose YOUR taste
-
-**WHAT TO AVOID:**
-- Generic "safe" recommendations that ignore their actual style
-- Suggesting formal wear to someone clearly dressed casually
-- Cultural stereotypes - an Indian person in a band t-shirt wants band t-shirts, not kurtas
-- Ignoring visible style cues in favor of profile data
+- NEVER suggest shoes, caps, watches, or accessories
 
 Output ONLY a JSON array of 8-10 search keywords. No explanation.
 
-Example - Person wearing casual streetwear (hoodie, sneakers):
-["black oversized hoodie mens", "navy cargo joggers men", "white chunky sneakers mens", "gray graphic tee men", "olive bomber jacket mens"]
+Example - Person wearing casual streetwear:
+["black oversized hoodie mens", "navy cargo joggers men", "gray graphic tee men", "olive bomber jacket mens", "black jogger pants mens", "white cotton t-shirt men"]
 
-Example - Person in smart casual polo and chinos:
-["navy slim fit polo mens", "beige cotton chinos men", "brown leather loafers mens", "white oxford shirt men", "olive green sweater mens"]
+Example - Person in smart casual:
+["navy slim fit polo mens", "beige cotton chinos men", "white oxford shirt men", "olive green sweater mens", "gray dress pants mens", "burgundy cardigan men"]
 
 Example - Person in ethnic/traditional wear:
-["embroidered cotton kurta mens", "white linen kurta men", "beige churidar pants mens", "navy nehru jacket mens", "brown kolhapuri sandals mens"]"""
+["embroidered cotton kurta mens", "white linen kurta men", "beige churidar pants mens", "navy nehru jacket mens", "silk kurta men", "cotton pajama pants mens"]"""
 
         # Retry loop with exponential backoff
         last_error = None
@@ -768,8 +776,8 @@ Example - Person in ethnic/traditional wear:
     def _get_fallback_keywords(self, color_recs: Optional[Dict] = None, gender: str = None, ethnicity: str = None, style: str = None) -> List[str]:
         """
         Return simple fallback keywords when Gemini API fails.
-        Uses color theory but keeps clothing generic - no cultural assumptions.
-        The vision-based Gemini analysis is what handles personalization.
+        ONLY returns try-on-able clothing: tops, bottoms, dresses.
+        NO shoes, caps, watches, accessories.
         """
         gender = (gender or '').lower()
         
@@ -784,7 +792,7 @@ Example - Person in ethnic/traditional wear:
             colors = ['navy', 'gray', 'olive', 'burgundy']
             neutrals = ['black', 'white', 'beige']
         
-        # Simple, universal clothing items with colors
+        # ONLY clothing that can be virtually tried on - NO shoes, caps, accessories
         if is_male:
             fallback = [
                 f"{colors[0]} t-shirt mens",
@@ -793,8 +801,8 @@ Example - Person in ethnic/traditional wear:
                 f"{colors[2]} hoodie men",
                 "denim jeans mens",
                 f"{colors[3]} sweater mens" if len(colors) > 3 else "gray sweater mens",
-                f"{neutrals[1]} sneakers men",
-                "casual jacket mens"
+                "casual jacket mens",
+                f"{neutrals[1]} jogger pants men"
             ]
         elif is_female:
             fallback = [
@@ -804,23 +812,23 @@ Example - Person in ethnic/traditional wear:
                 f"{colors[2]} cardigan women",
                 "denim jeans womens",
                 f"{colors[3]} dress womens" if len(colors) > 3 else "casual dress womens",
-                f"{neutrals[1]} sneakers women",
-                "casual jacket womens"
+                "casual jacket womens",
+                f"{neutrals[1]} skirt women"
             ]
         else:
-            # Gender neutral
+            # Gender neutral - still only try-on-able clothing
             fallback = [
                 f"{colors[0]} t-shirt",
                 f"{colors[1]} hoodie",
                 f"{neutrals[0]} joggers",
                 f"{colors[2]} sweater",
                 "denim jeans",
-                f"{neutrals[1]} sneakers",
                 "casual jacket",
-                "canvas bag"
+                f"{neutrals[1]} pants",
+                f"{colors[3]} cardigan" if len(colors) > 3 else "gray cardigan"
             ]
         
-        logger.info(f"[FALLBACK KEYWORDS] Using simple color-based fallback: {fallback}")
+        logger.info(f"[FALLBACK KEYWORDS] Using try-on compatible fallback: {fallback}")
         return fallback
     
     async def _search_ebay(self, query: str) -> List[Dict]:
@@ -858,11 +866,11 @@ Example - Person in ethnic/traditional wear:
                 response.raise_for_status()
                 products_data = response.json()  # Platzi returns array directly
                 
-                # Filter to only clothes (1), shoes (4), and accessories/misc (5)
-                fashion_categories = {1, 4, 5}
+                # Filter to ONLY clothes (category 1) - NO shoes (4) or accessories (5)
+                # LEFFA can only try on tops, bottoms, and dresses - not footwear or accessories
                 products_data = [
                     p for p in products_data 
-                    if p.get('category', {}).get('id') in fashion_categories
+                    if p.get('category', {}).get('id') == 1  # Only clothes category
                 ]
                 
                 if not products_data:
@@ -877,6 +885,29 @@ Example - Person in ethnic/traditional wear:
                 
                 if not products_data:
                     logger.warning(f"No products found for '{search_term}'")
+                    return self._get_fallback_product(query)
+                
+                # CRITICAL: Filter out non-try-on-able items by title keywords
+                # Even in clothes category, some items can't be tried on
+                excluded_keywords = [
+                    'shoe', 'sneaker', 'boot', 'heel', 'loafer', 'sandal', 'slipper', 'pump', 'oxford', 'moccasin',
+                    'cap', 'hat', 'beanie', 'visor', 'headband', 'bandana',
+                    'watch', 'jewelry', 'necklace', 'bracelet', 'ring', 'earring', 'anklet',
+                    'bag', 'purse', 'backpack', 'wallet', 'clutch', 'tote', 'luggage', 'suitcase',
+                    'sunglasses', 'glasses', 'eyewear', 'goggles',
+                    'belt', 'scarf', 'glove', 'sock', 'tie', 'bow tie', 'cufflink',
+                    'mask', 'umbrella', 'keychain', 'phone case',
+                    'gokart', 'go-kart', 'vehicle', 'toy', 'game', 'electronic'
+                ]
+                
+                def is_tryonable(item):
+                    title = item.get('title', '').lower()
+                    return not any(excluded in title for excluded in excluded_keywords)
+                
+                products_data = [p for p in products_data if is_tryonable(p)]
+                
+                if not products_data:
+                    logger.warning(f"All products filtered out for '{search_term}' (non-try-on-able)")
                     return self._get_fallback_product(query)
                 
                 # Parse and return products with real images
@@ -957,13 +988,12 @@ Example - Person in ethnic/traditional wear:
     def _extract_search_term(self, query: str) -> str:
         """Extract clean search term from the query for Platzi API.
         
-        Platzi API has products with titles like:
-        - "Classic Comfort Fit Joggers"
-        - "Classic Red Baseball Cap"  
-        - "Rainbow Glitter High Heels"
-        - "Vibrant Pink Classic Sneakers"
+        ONLY extracts terms for try-on-able clothing:
+        - Tops: shirts, hoodies, jackets, sweaters, etc.
+        - Bottoms: pants, jeans, shorts, joggers, etc.
+        - Dresses: dresses, jumpsuits, etc.
         
-        We extract the main item type for best matching.
+        Ignores shoes, caps, accessories completely.
         """
         query_lower = query.lower()
         
@@ -973,84 +1003,74 @@ Example - Person in ethnic/traditional wear:
         for term in remove_terms:
             query_lower = query_lower.replace(term, '').strip()
         
-        # Priority clothing terms that match Platzi product titles
+        # ONLY try-on-able clothing terms - NO shoes, caps, accessories
         priority_matches = {
-            'jogger': 'jogger',
-            'joggers': 'jogger', 
+            # TOPS
             'hoodie': 'hoodie',
-            'cap': 'cap',
-            'baseball cap': 'cap',
-            'hat': 'cap',
             't-shirt': 't-shirt',
             'tshirt': 't-shirt',
             'shirt': 'shirt',
-            'shorts': 'shorts',
-            'sneaker': 'sneaker',
-            'sneakers': 'sneaker',
-            'heel': 'heel',
-            'heels': 'heel',
-            'boot': 'boot',
-            'boots': 'boot',
-            'loafer': 'loafer',
-            'sandal': 'sandal',
+            'blouse': 'shirt',
+            'polo': 'shirt',
             'jacket': 'jacket',
+            'blazer': 'jacket',
+            'coat': 'jacket',
             'sweater': 'sweater',
-            'cardigan': 'cardigan',
+            'cardigan': 'sweater',
+            'top': 'shirt',
+            'kurta': 'shirt',
+            'tunic': 'shirt',
+            # BOTTOMS
+            'jogger': 'jogger',
+            'joggers': 'jogger', 
             'pants': 'pants',
+            'trousers': 'pants',
+            'chinos': 'pants',
             'jean': 'jeans',
             'jeans': 'jeans',
+            'shorts': 'shorts',
+            'skirt': 'shorts',  # Map to shorts for search
+            'leggings': 'jogger',
+            # DRESSES/FULL
             'dress': 'dress',
+            'jumpsuit': 'dress',
+            'romper': 'dress',
+            'overall': 'dress',
         }
         
-        # Check for priority matches
+        # Check for priority matches (try-on-able items only)
         for keyword, search_term in priority_matches.items():
             if keyword in query_lower:
                 return search_term
         
-        # Try to extract a color + item combination
+        # Try to extract a color + default to shirt/pants
         colors = ['black', 'white', 'red', 'blue', 'navy', 'green', 'pink', 
                   'gray', 'grey', 'brown', 'purple', 'orange', 'teal']
         
-        found_color = None
         for color in colors:
             if color in query_lower:
-                found_color = color
-                break
+                return color
         
-        # Return color if found (Platzi has color-named items)
-        if found_color:
-            return found_color
+        # Default to 'shirt' for tops or 'pants' for bottoms - always try-on-able
+        if any(top_word in query_lower for top_word in ['top', 'upper', 'chest']):
+            return 'shirt'
+        if any(bottom_word in query_lower for bottom_word in ['bottom', 'lower', 'leg']):
+            return 'pants'
         
-        # Return first significant word
-        words = [w for w in query_lower.split() if len(w) > 2]
-        return words[0] if words else 'classic'
+        # Generic default - shirt is most common try-on item
+        return 'shirt'
     
     def _guess_category(self, query: str) -> Optional[int]:
-        """Guess Platzi API category ID from search query.
+        """Always return clothes category (1) for virtual try-on.
         
-        Platzi Categories:
-        - 1: Clothes (t-shirts, joggers, caps, shorts, hoodies)
-        - 4: Shoes (sneakers, heels, boots, loafers)
-        - 5: Miscellaneous (bags, accessories)
+        LEFFA can only try on:
+        - Tops (shirts, hoodies, jackets, etc.)
+        - Bottoms (pants, jeans, shorts, etc.)
+        - Dresses/full body items
+        
+        We NEVER want shoes (4) or accessories (5) since they can't be tried on.
         """
-        query_lower = query.lower()
-        
-        # Shoes category (id=4)
-        if any(term in query_lower for term in ['sneaker', 'shoe', 'boot', 'heel', 'loafer', 'sandal', 'pump']):
-            return 4
-        
-        # Clothes category (id=1) - most fashion items
-        if any(term in query_lower for term in ['shirt', 'tshirt', 't-shirt', 'polo', 'hoodie', 'sweater', 
-                                                   'jeans', 'pants', 'shorts', 'jacket', 'blazer', 'coat',
-                                                   'dress', 'skirt', 'blouse', 'cap', 'jogger', 'cardigan']):
-            return 1
-        
-        # Miscellaneous for accessories (id=5)
-        if any(term in query_lower for term in ['bag', 'handbag', 'purse', 'watch', 'sunglasses', 
-                                                   'glasses', 'luggage', 'accessory']):
-            return 5
-        
-        # Default to clothes
+        # Always return clothes category - we filter everything else out
         return 1
     
     def _extract_category_from_query(self, query: str) -> str:

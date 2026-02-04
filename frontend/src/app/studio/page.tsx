@@ -25,6 +25,7 @@ function StudioContent() {
     tryOnResults,
     recommendations,
     selectedGarment,
+    tryOnOptions,
     isGenerating,
     isLoadingRecommendations,
     hasRequestedRecommendations,
@@ -40,6 +41,7 @@ function StudioContent() {
     setIsLoadingRecommendations,
     setHasRequestedRecommendations,
     setPersonalImage,
+    updateTryOnOption,
   } = useStudio();
 
   const [activeTab, setActiveTab] = useState<TabType>('personal');
@@ -144,7 +146,8 @@ function StudioContent() {
 
       const result = await endpoints.generateTryOn(
         personalImage.url,
-        selectedGarment.url
+        selectedGarment.url,
+        tryOnOptions
       );
 
       addTryOnResult(result);
@@ -338,6 +341,8 @@ function StudioContent() {
                     onGarmentSelect={handleGarmentSelect}
                     onGarmentUpload={handleGarmentUpload}
                     isLoading={isLoadingGarments}
+                    tryOnOptions={tryOnOptions}
+                    onOptionsChange={updateTryOnOption}
                   />
                 )}
 
