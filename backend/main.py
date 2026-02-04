@@ -70,11 +70,12 @@ app = FastAPI(
 
 # CORS Configuration 
 # SECURITY: Use explicit origins in production, never "*"
-allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "*")
 origins = [origin.strip() for origin in allowed_origins_str.split(",")]
 
 # Validate CORS configuration
-if "*" in origins:
+allow_all_origins = "*" in origins
+if allow_all_origins:
     logger.warning(
         "CORS configured to allow ALL origins (*). "
         "This is a SECURITY RISK in production! "
@@ -83,8 +84,8 @@ if "*" in origins:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"] if allow_all_origins else origins,
+    allow_credentials=not allow_all_origins,  # Can't use credentials with wildcard
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
