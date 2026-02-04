@@ -59,28 +59,31 @@ async def get_recommendations(
     body_type: Optional[str] = Form(None),
     ethnicity: Optional[str] = Form(None),
     gender: Optional[str] = Form(None),
+    skin_tone: Optional[str] = Form(None),
     style_preference: Optional[str] = Form(None)
 ):
     """
     Get AI-powered outfit recommendations using image collage + Gemini Vision + eBay search.
     
     Pipeline:
-    1. Create collage from user photo, wardrobe, generated images
-    2. Gemini Vision analyzes with user profile data (height, weight, body type, etc.)
-    3. Extract keywords with color theory and personalization
-    4. Search eBay via RapidAPI
-    5. Return products with buy links
+    1. Extract skin tone from user photo (if not provided)
+    2. Create collage from user photo, wardrobe, generated images
+    3. Gemini Vision analyzes with user profile data and color theory
+    4. Extract keywords with scientific color theory based on skin tone
+    5. Search eBay via RapidAPI
+    6. Return products with buy links (up to 20 items)
     
     Args:
-        user_photo: User's photo
+        user_photo: User's photo (used for skin tone extraction if not provided)
         wardrobe_images: Optional wardrobe items
         generated_images: Optional generated body images
         height_cm: User height in cm (140-220)
         weight_kg: User weight in kg (40-200)
         body_type: Body type (slim, athletic, average, curvy, plus_size)
-        ethnicity: Ethnicity for skin tone matching
+        ethnicity: Ethnicity for cultural style preferences
         gender: Gender for style preferences
-        style_preference: User's style preferences
+        skin_tone: Skin tone category (fair_cool, fair_warm, light_cool, etc.)
+        style_preference: User's style preferences (casual, formal, sporty, etc.)
     """
     try:
         # Validate user photo
@@ -122,6 +125,8 @@ async def get_recommendations(
             user_profile['ethnicity'] = ethnicity
         if gender:
             user_profile['gender'] = gender
+        if skin_tone:
+            user_profile['skin_tone'] = skin_tone
         if style_preference:
             user_profile['style_preference'] = style_preference
         
@@ -135,6 +140,7 @@ async def get_recommendations(
             user_profile=user_profile if user_profile else None
         )
         
+        logger.info(f"Returning {len(products)} recommendations")
         return products
         
     except Exception as e:

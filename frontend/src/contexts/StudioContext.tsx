@@ -13,9 +13,20 @@ interface PersonalImage {
   uploadedAt: Date;
 }
 
+interface UserProfileData {
+  height_cm?: number;
+  weight_kg?: number;
+  body_type?: string;
+  ethnicity?: string;
+  gender?: string;
+  skin_tone?: string;
+  style_preference?: string;
+}
+
 interface StudioContextState {
   // Data
   personalImage: PersonalImage | null;
+  userProfile: UserProfileData | null;
   garments: Garment[];
   tryOnResults: TryOnResult[];
   recommendations: Recommendation[];
@@ -77,6 +88,7 @@ interface PersistedState {
 export function StudioProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<StudioContextState>({
     personalImage: null,
+    userProfile: null,
     garments: [],
     tryOnResults: [],
     recommendations: [],
@@ -111,15 +123,17 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
           isLoadingGarments: true 
         }));
 
-        const [personalImageResult, garmentsResult] = await Promise.allSettled([
+        const [personalImageResult, garmentsResult, profileResult] = await Promise.allSettled([
           endpoints.getPersonalImage(session.user.id),
           endpoints.listGarments(session.user.id),
+          endpoints.getUserProfile(session.user.id),
         ]);
 
         setState(prev => ({
           ...prev,
           personalImage: personalImageResult.status === 'fulfilled' ? personalImageResult.value : null,
           garments: garmentsResult.status === 'fulfilled' ? garmentsResult.value : [],
+          userProfile: profileResult.status === 'fulfilled' ? profileResult.value : null,
           isLoadingPersonalImage: false,
           isLoadingGarments: false,
         }));

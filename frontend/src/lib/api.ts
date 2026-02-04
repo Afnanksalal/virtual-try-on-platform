@@ -165,7 +165,16 @@ export const endpoints = {
   getRecommendations: (
     userPhoto: File,
     wardrobeImages?: File[],
-    generatedImages?: File[]
+    generatedImages?: File[],
+    userProfile?: {
+      height_cm?: number;
+      weight_kg?: number;
+      body_type?: string;
+      ethnicity?: string;
+      gender?: string;
+      skin_tone?: string;
+      style_preference?: string;
+    }
   ): Promise<Recommendation[]> => {
     const formData = new FormData();
     formData.append("user_photo", userPhoto);
@@ -176,6 +185,17 @@ export const endpoints = {
     
     if (generatedImages) {
       generatedImages.forEach(img => formData.append("generated_images", img));
+    }
+    
+    // Add user profile data for personalized recommendations
+    if (userProfile) {
+      if (userProfile.height_cm) formData.append("height_cm", String(userProfile.height_cm));
+      if (userProfile.weight_kg) formData.append("weight_kg", String(userProfile.weight_kg));
+      if (userProfile.body_type) formData.append("body_type", userProfile.body_type);
+      if (userProfile.ethnicity) formData.append("ethnicity", userProfile.ethnicity);
+      if (userProfile.gender) formData.append("gender", userProfile.gender);
+      if (userProfile.skin_tone) formData.append("skin_tone", userProfile.skin_tone);
+      if (userProfile.style_preference) formData.append("style_preference", userProfile.style_preference);
     }
     
     return api.post("/api/v1/recommend", formData);
@@ -385,6 +405,42 @@ export const endpoints = {
       'generate try-on',
       { maxAttempts: 2 } // ML operations are expensive, limit retries
     );
+  },
+
+  // User Profile Management
+  getUserProfile: async (userId: string): Promise<{
+    height_cm?: number;
+    weight_kg?: number;
+    body_type?: string;
+    ethnicity?: string;
+    gender?: string;
+    skin_tone?: string;
+    style_preference?: string;
+  } | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('height_cm, weight_kg, body_type, ethnicity, gender, skin_tone, style_preference')
+        .eq('id', userId)
+        .single();
+
+      if (error || !data) {
+        return null;
+      }
+
+      return {
+        height_cm: data.height_cm || undefined,
+        weight_kg: data.weight_kg || undefined,
+        body_type: data.body_type || undefined,
+        ethnicity: data.ethnicity || undefined,
+        gender: data.gender || undefined,
+        skin_tone: data.skin_tone || undefined,
+        style_preference: data.style_preference || undefined,
+      };
+    } catch (error) {
+      console.error('Failed to fetch user profile:', error);
+      return null;
+    }
   },
 
   // Personal Image Management

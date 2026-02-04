@@ -104,6 +104,7 @@ export interface Recommendation {
   condition?: string;
   shipping?: number;
   relevance_score?: number;
+  search_query?: string; // The keyword used to find this item
 }
 
 // Alias for backward compatibility

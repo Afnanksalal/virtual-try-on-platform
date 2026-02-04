@@ -20,6 +20,7 @@ import { Sparkles, Zap } from "lucide-react";
 function StudioContent() {
   const {
     personalImage,
+    userProfile,
     garments,
     tryOnResults,
     recommendations,
@@ -178,7 +179,13 @@ function StudioContent() {
       const blob = await response.blob();
       const personalImageFile = new File([blob], 'personal.jpg', { type: blob.type });
 
-      const recommendations = await endpoints.getRecommendations(personalImageFile);
+      // Pass user profile data for personalized color theory recommendations
+      const recommendations = await endpoints.getRecommendations(
+        personalImageFile,
+        undefined, // wardrobeImages
+        undefined, // generatedImages
+        userProfile || undefined
+      );
 
       setRecommendations(recommendations);
       setIsLoadingRecommendations(false);
