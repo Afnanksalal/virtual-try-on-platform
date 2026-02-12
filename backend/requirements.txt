@@ -80,3 +80,8 @@ supabase
 python-dotenv
 requests
 httpx
+
+# -----------------------------------------------------------------------------
+# Compatibility Fixes
+# -----------------------------------------------------------------------------
+protobuf<4  # Required by open-clip-torch and compatible with HuggingFace stack
