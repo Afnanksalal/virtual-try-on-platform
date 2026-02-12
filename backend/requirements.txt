@@ -38,6 +38,7 @@ huggingface_hub<1.0  # Pin for compatibility with transformers/tokenizers
 triton
 
 # -----------------------------------------------------------------------------
+
 # Leffa Additional Dependencies
 # -----------------------------------------------------------------------------
 av
@@ -58,7 +59,7 @@ psutil
 regex==2024.5.15
 scikit-image
 scipy
-timm
+timm<=0.6.7  # Required for controlnet-aux compatibility
 torchmetrics
 tqdm
 
@@ -69,9 +70,11 @@ insightface
 onnx
 
 # -----------------------------------------------------------------------------
-# AI Services (Gemini)
+
 # -----------------------------------------------------------------------------
-google-generativeai
+# AI Services (Gemini) - Removed gradio and UI dependencies
+# -----------------------------------------------------------------------------
+# google-generativeai
 
 # -----------------------------------------------------------------------------
 # Supabase Storage
@@ -84,6 +87,13 @@ supabase
 python-dotenv
 requests
 httpx
+# -----------------------------------------------------------------------------
+# xFormers (memory-efficient attention)
+# -----------------------------------------------------------------------------
+# For PyTorch 2.10.0+cu128 (T4), install xformers from source for compatibility:
+#   pip uninstall xformers -y
+#   pip install ninja
+#   pip install git+https://github.com/facebookresearch/xformers.git
 
 # -----------------------------------------------------------------------------
 # Compatibility Fixes
