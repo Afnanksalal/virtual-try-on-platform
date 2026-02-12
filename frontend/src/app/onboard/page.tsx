@@ -57,6 +57,7 @@ export default function OnboardPage() {
   const [generatedBodies, setGeneratedBodies] = useState<Array<{id: string; url: string}>>([]);
   const [selectedBodyType, setSelectedBodyType] = useState<string>("");
   const [composedImage, setComposedImage] = useState<string>("");
+  const [usedFallback, setUsedFallback] = useState(false); // Track if SDXL fallback was used
 
   const bodyTypes = [
     { id: "athletic", label: "Athletic", icon: Dumbbell, desc: "Toned & fit" },
@@ -224,22 +225,44 @@ export default function OnboardPage() {
       return;
     }
     
-    // If head-only photo, generate body options
+    // If head-only photo, generate identity-preserving body options
+    // This uses InstantID to generate bodies with user's actual face (not stitched!)
     setCurrentStep("generating");
     setLoading(true);
     
     try {
-      // Generate body options
-      const result = await endpoints.generateBodies({
-        ethnicity: bodyParameters.ethnicity || "Mixed",
-        skin_tone: "Medium",
+      if (!uploadedImage) {
+        throw new Error("No image uploaded");
+      }
+      
+      // NEW: Use identity-preserving generation with Gemini + InstantID
+      // This generates full bodies with the user's face natively - no stitching required!
+      const result = await endpoints.generateIdentityBody({
+        faceImage: uploadedImage,
         body_type: bodyParameters.bodyType,
         height_cm: bodyParameters.height,
         weight_kg: bodyParameters.weight,
+        gender: bodyParameters.gender,
+        ethnicity: bodyParameters.ethnicity || undefined,
+        num_images: 4,
+        use_gemini_analysis: true, // Let Gemini detect skin tone, ethnicity accurately
       });
       
       setGeneratedBodies(result.images);
-      toast.success("Body options generated!");
+      
+      // Check if fallback was used (InstantID not available)
+      if (result.method === "sdxl_fallback") {
+        setUsedFallback(true);
+        toast.info("Using enhanced body generation. Your face will be seamlessly integrated.");
+      } else {
+        setUsedFallback(false);
+        // Show detected features
+        if (result.analysis) {
+          toast.success(`Generated with detected skin tone: ${result.params_used?.skin_tone || "auto"}`);
+        } else {
+          toast.success("Body options generated with your face!");
+        }
+      }
     } catch (error) {
       console.error("Body generation error:", error);
       toast.error("Failed to generate bodies. Please try again.");
@@ -254,21 +277,21 @@ export default function OnboardPage() {
     setLoading(true);
     
     try {
-      if (!uploadedImage) return;
-      
-      // Fetch body image from Supabase URL
-      const bodyFile = await fetch(bodyUrl).then(r => r.blob()).then(b => new File([b], "body.png"));
-      
-      // Combine head + body
-      const result = await endpoints.combineHeadBody(uploadedImage, bodyFile);
-      setComposedImage(result.image_url);
-      
-      toast.success("Images combined successfully!");
-      // Proceed to save
-      await saveProfile(result.image_url);
+      // Check if we need to do head stitching (fallback mode)
+      if (usedFallback && uploadedImage) {
+        // Fallback: Need to combine head with generated body
+        const bodyFile = await fetch(bodyUrl).then(r => r.blob()).then(b => new File([b], "body.png"));
+        const result = await endpoints.combineHeadBody(uploadedImage, bodyFile);
+        toast.success("Images combined successfully!");
+        await saveProfile(result.image_url);
+      } else {
+        // InstantID: Face is already generated natively, just save
+        toast.success("Perfect! Saving your profile...");
+        await saveProfile(bodyUrl);
+      }
     } catch (error) {
-      console.error("Combination error:", error);
-      toast.error("Failed to combine images. Please try again.");
+      console.error("Save error:", error);
+      toast.error("Failed to save. Please try again.");
       setLoading(false);
     }
   };
@@ -591,7 +614,7 @@ export default function OnboardPage() {
                         }`}>
                           {imageAnalysis.type === "head_only" ? (
                             <>
-                              <strong>Head-only photo detected!</strong> We&apos;ll generate a body model based on your preferences.
+                              <strong>Head-only photo detected!</strong> AI will create a full-body digital twin that naturally preserves your face.
                             </>
                           ) : (
                             <>
@@ -754,16 +777,18 @@ export default function OnboardPage() {
                     {generatedBodies.length === 0 ? (
                       <div className="flex flex-col items-center justify-center gap-4 py-12">
                         <Loader2 className="animate-spin h-12 w-12 text-black" />
-                        <h3 className="text-xl font-semibold text-gray-900">Generating Body Models</h3>
+                        <h3 className="text-xl font-semibold text-gray-900">Creating Your Digital Twin</h3>
                         <p className="text-gray-600 text-center max-w-md">
-                          Creating personalized body options based on your parameters. This may take a few moments.
+                          AI is generating personalized full-body images with your face. 
+                          This uses advanced identity preservation for natural results.
                         </p>
+                        <p className="text-xs text-gray-400">Analyzing facial features &amp; generating...</p>
                         <div className="w-full max-w-xs bg-gray-200 rounded-full h-2 mt-4">
                           <motion.div
                             className="bg-black h-2 rounded-full"
                             initial={{ width: "0%" }}
                             animate={{ width: "100%" }}
-                            transition={{ duration: 10, ease: "linear" }}
+                            transition={{ duration: 30, ease: "linear" }}
                           />
                         </div>
                       </div>
@@ -778,7 +803,10 @@ export default function OnboardPage() {
                               <ChevronLeft className="h-5 w-5" />
                             </button>
                           )}
-                          <h3 className="text-xl sm:text-2xl font-semibold">Select Your Preferred Body</h3>
+                          <div>
+                            <h3 className="text-xl sm:text-2xl font-semibold">Choose Your Look</h3>
+                            <p className="text-sm text-gray-500">These are AI-generated images of you with different poses</p>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -791,7 +819,7 @@ export default function OnboardPage() {
                             >
                               <Image
                                 src={body.url}
-                                alt={`Body ${body.id}`}
+                                alt={`Generated look ${body.id}`}
                                 fill
                                 className="object-cover group-hover:scale-105 transition-transform duration-300"
                               />

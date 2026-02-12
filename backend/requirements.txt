@@ -51,6 +51,16 @@ timm==0.6.7
 controlnet-aux==0.0.9
 
 # -----------------------------------------------------------------------------
+# InstantID Face Identity Preservation
+# For generating full-body images while preserving user's facial identity
+# NOTE: Requires manual download of antelopev2 model (see setup_instantid script)
+# -----------------------------------------------------------------------------
+insightface==0.7.3
+albumentations>=1.3.0,<2.0.0
+# Cython required for insightface build
+Cython>=0.29.0
+
+# -----------------------------------------------------------------------------
 # Image Processing
 # -----------------------------------------------------------------------------
 pillow==10.4.0

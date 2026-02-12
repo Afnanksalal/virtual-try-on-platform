@@ -272,6 +272,84 @@ export const endpoints = {
     return api.post("/api/v1/combine-head-body", formData);
   },
 
+  // NEW: Identity-Preserving Body Generation (replaces cut-and-paste approach)
+  analyzeFaceFeatures: (image: File): Promise<{
+    success: boolean;
+    analysis: {
+      skin_tone: string;
+      skin_tone_category: string;
+      ethnicity: string;
+      age_range: string;
+      gender_presentation: string;
+      facial_features: {
+        face_shape: string;
+        distinctive_features: string[];
+        expression: string;
+      };
+      hair: {
+        color: string;
+        style: string;
+        length: string;
+      };
+      generation_prompt_additions?: string;
+    };
+  }> => {
+    const formData = new FormData();
+    formData.append("image", image);
+    return api.post("/api/v1/analyze-face-features", formData);
+  },
+
+  generateIdentityBody: (data: {
+    faceImage: File;
+    body_type: string;
+    height_cm: number;
+    weight_kg: number;
+    gender: string;
+    ethnicity?: string;
+    skin_tone?: string;
+    num_images?: number;
+    use_gemini_analysis?: boolean;
+  }): Promise<{
+    success: boolean;
+    request_id: string;
+    count: number;
+    images: Array<{ id: string; url: string }>;
+    analysis?: {
+      skin_tone: string;
+      ethnicity: string;
+    };
+    params_used: {
+      body_type: string;
+      ethnicity: string;
+      skin_tone: string;
+    };
+    method: "instantid" | "sdxl_fallback";
+    note?: string;
+  }> => {
+    const formData = new FormData();
+    formData.append("face_image", data.faceImage);
+    formData.append("body_type", data.body_type);
+    formData.append("height_cm", data.height_cm.toString());
+    formData.append("weight_kg", data.weight_kg.toString());
+    formData.append("gender", data.gender);
+    if (data.ethnicity) formData.append("ethnicity", data.ethnicity);
+    if (data.skin_tone) formData.append("skin_tone", data.skin_tone);
+    formData.append("num_images", (data.num_images || 4).toString());
+    formData.append("use_gemini_analysis", (data.use_gemini_analysis ?? true).toString());
+    return api.post("/api/v1/generate-identity-body", formData);
+  },
+
+  previewBodyTypes: (): Promise<{
+    body_types: Array<{
+      id: string;
+      label: string;
+      description: string;
+      preview_url: string | null;
+    }>;
+  }> => {
+    return api.post("/api/v1/preview-body-types");
+  },
+
   // Garment Management
   uploadGarment: async (file: File, userId: string): Promise<Garment> => {
     return withRetry(
