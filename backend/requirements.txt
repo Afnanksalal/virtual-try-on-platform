@@ -14,8 +14,11 @@ python-multipart
 
 # -----------------------------------------------------------------------------
 # PyTorch Stack - Install FIRST with your CUDA version:
-# CUDA 11.8: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-# CUDA 12.1: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# For NVIDIA T4 GPU (CUDA 12.x):
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# Or for latest CUDA 12.x (recommended for T4):
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# See: https://pytorch.org/get-started/locally/
 # -----------------------------------------------------------------------------
 torch
 torchvision
@@ -45,7 +48,7 @@ imageio
 matplotlib
 numpy
 omegaconf
-onnxruntime
+onnxruntime-gpu  # Use GPU acceleration for ONNX on NVIDIA T4. If no GPU, use 'onnxruntime' instead.
 opencv-python
 pandas
 pillow
