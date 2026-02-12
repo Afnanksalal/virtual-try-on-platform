@@ -105,9 +105,9 @@ if [[ -z "$VIRTUAL_ENV" ]]; then
     log_warn "Virtual environment not detected. Make sure dependencies install to the right location."
 fi
 
-# Install required packages
-log_info "Installing/updating required Python packages..."
-pip install --quiet --upgrade huggingface_hub insightface onnxruntime || {
+# Install required packages from requirements.txt for version pinning
+log_info "Installing/updating required Python packages from requirements.txt..."
+pip install --quiet --upgrade -r "$BACKEND_DIR/requirements.txt" || {
     log_warn "Some packages may have failed to install. Continuing..."
 }
 log_success "Python packages ready"
