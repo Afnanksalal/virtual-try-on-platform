@@ -31,6 +31,7 @@ transformers
 safetensors
 peft
 tokenizers
+huggingface_hub<1.0  # Pin for compatibility with transformers/tokenizers
 triton
 
 # -----------------------------------------------------------------------------
