@@ -184,6 +184,14 @@ async def generate_identity_body(
             logger.warning(f"InstantID not available, using SDXL fallback: {e}")
             use_fallback = True
             
+            # CRITICAL: Clean up GPU memory before fallback
+            import torch
+            import gc
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                gc.collect()
+                logger.info("GPU memory cleared before SDXL fallback")
+            
             # Fallback: Use improved SDXL generation with Gemini-analyzed prompts
             try:
                 from .body_generation import get_sdxl_pipeline

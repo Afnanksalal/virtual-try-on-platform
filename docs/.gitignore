@@ -1,0 +1,20 @@
+# Documentation - Git Ignore
+
+# Generated reports and verification files
+verification_report.json
+baseline_test_results.json
+package_report.json
+*_report.json
+
+# Backup files
+*.backup
+*.bak
+*.old
+*.txt
+!INSIGHTFACE_WINDOWS_FIX.md
+
+# Environment snapshots
+environment.yml
+*_baseline.txt
+*_info.txt
+*_notes.txt

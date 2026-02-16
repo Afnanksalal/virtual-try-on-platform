@@ -38,6 +38,8 @@ def setup_leffa_path() -> Optional[str]:
     The Leffa repository should be cloned at the project root level,
     at the same level as backend/ and frontend/ folders.
     
+    Also adds the 3rdparty directory to sys.path for SCHP, detectron2, and densepose imports.
+    
     Returns:
         Path to Leffa directory if found, None otherwise
     """
@@ -56,6 +58,14 @@ def setup_leffa_path() -> Optional[str]:
         if os.path.exists(abs_path) and os.path.isdir(abs_path) and os.path.exists(leffa_subfolder):
             if abs_path not in sys.path:
                 sys.path.insert(0, abs_path)
+            
+            # Add 3rdparty directory for SCHP, detectron2, densepose imports
+            # This is needed because Windows doesn't handle symlinks properly
+            thirdparty_path = os.path.join(abs_path, '3rdparty')
+            if os.path.exists(thirdparty_path) and thirdparty_path not in sys.path:
+                sys.path.insert(0, thirdparty_path)
+                logger.info(f"Added 3rdparty path: {thirdparty_path}")
+            
             logger.info(f"Leffa repository found at: {abs_path}")
             return abs_path
     

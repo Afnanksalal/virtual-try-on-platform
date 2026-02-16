@@ -9,7 +9,7 @@ Provides endpoints for:
 All operations use Supabase storage with proper user isolation.
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Path, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Path, Query, Depends
 from typing import List
 from app.services.supabase_storage import supabase_storage
 from app.models.schemas import (
@@ -19,6 +19,7 @@ from app.models.schemas import (
     GarmentMetadata
 )
 from app.core.logging_config import get_logger
+from app.core.auth import get_current_user
 from app.core.exceptions import (
     StorageErrorException,
     SupabaseUnavailableException,
@@ -32,16 +33,19 @@ router = APIRouter()
 
 @router.post("/garments/upload", response_model=GarmentUploadResponse)
 async def upload_garment(
-    user_id: str = Query(..., min_length=1, max_length=100, description="User ID for storage isolation"),
-    file: UploadFile = File(..., description="Garment image file (JPG, PNG, WEBP, max 10MB)")
+    file: UploadFile = File(..., description="Garment image file (JPG, PNG, WEBP, max 10MB)"),
+    user_id: str = Depends(get_current_user)
 ):
     """
     Upload a garment image to user-specific storage.
     
+    **Authentication:**
+    - Requires valid JWT token
+    - User ID extracted from token automatically
+    
     **Validation:**
     - File format: JPG, PNG, WEBP
     - File size: Maximum 10MB
-    - User ID: Required for storage isolation
     
     **Storage:**
     - Bucket: user-garments
@@ -52,6 +56,7 @@ async def upload_garment(
     - Garment metadata including ID, URL, and upload timestamp
     
     **Errors:**
+    - 401: Authentication required
     - 400: Invalid file format or size
     - 500: Storage operation failed
     - 503: Supabase unavailable
@@ -113,13 +118,17 @@ async def upload_garment(
 
 @router.get("/garments/list", response_model=GarmentListResponse)
 async def list_garments(
-    user_id: str = Query(..., min_length=1, max_length=100, description="User ID for storage isolation")
+    user_id: str = Depends(get_current_user)
 ):
     """
-    List all garments for a specific user.
+    List all garments for the authenticated user.
+    
+    **Authentication:**
+    - Requires valid JWT token
+    - User ID extracted from token automatically
     
     **Data Isolation:**
-    - Only returns garments belonging to the specified user
+    - Only returns garments belonging to the authenticated user
     - No cross-user data leakage
     
     **Returns:**
@@ -127,6 +136,7 @@ async def list_garments(
     - Total count of garments
     
     **Errors:**
+    - 401: Authentication required
     - 500: Storage operation failed
     - 503: Supabase unavailable
     """
@@ -172,10 +182,14 @@ async def list_garments(
 @router.delete("/garments/{garment_id}", response_model=GarmentDeleteResponse)
 async def delete_garment(
     garment_id: str = Path(..., min_length=1, max_length=100, description="Garment ID to delete"),
-    user_id: str = Query(..., min_length=1, max_length=100, description="User ID for storage isolation")
+    user_id: str = Depends(get_current_user)
 ):
     """
-    Delete a specific garment for a user.
+    Delete a specific garment for the authenticated user.
+    
+    **Authentication:**
+    - Requires valid JWT token
+    - User ID extracted from token automatically
     
     **Cleanup:**
     - Removes file from Supabase storage
@@ -183,7 +197,7 @@ async def delete_garment(
     - No orphaned data left behind
     
     **Data Isolation:**
-    - Only deletes garments belonging to the specified user
+    - Only deletes garments belonging to the authenticated user
     - Prevents unauthorized deletion of other users' garments
     
     **Returns:**
@@ -192,6 +206,7 @@ async def delete_garment(
     - Deletion status
     
     **Errors:**
+    - 401: Authentication required
     - 404: Garment not found
     - 500: Storage operation failed
     """

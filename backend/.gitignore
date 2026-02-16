@@ -1,0 +1,52 @@
+# Backend-specific Git Ignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# Environment Variables
+.env
+*.env
+!.env.example
+
+# ML Models & Checkpoints
+ml_engine/weights/*
+!ml_engine/weights/.gitkeep
+3d/models/*.pt
+3d/models/*.pth
+3d/models/*.safetensors
+!3d/models/.gitkeep
+
+# Generated Data
+data/*
+!data/.gitkeep
+3d/outputs/*.glb
+3d/outputs/*.obj
+3d/outputs/*.ply
+3d/outputs/*.mtl
+3d/outputs/*.png
+!3d/outputs/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+*.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# Verification Reports
+verification_report.json

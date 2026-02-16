@@ -14,7 +14,7 @@ class BodyDetector:
         """Lazy load pose model."""
         if self._pose_model is None:
             try:
-                from ..ml_engine.loader import model_loader
+                from ml_engine.loader import model_loader
                 self._pose_model = model_loader.load_pose()
                 logger.info("Pose model loaded successfully")
             except Exception as e:

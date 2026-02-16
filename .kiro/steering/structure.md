@@ -49,34 +49,63 @@ frontend/
 ```
 backend/
 ├── app/
-│   ├── api/                   # API route handlers
-│   │   ├── endpoints.py       # Core endpoints (recommend, try-on)
-│   │   ├── body_generation.py # Body model generation
-│   │   ├── image_analysis.py  # Image type detection
-│   │   └── image_composition.py # Head-body composition
-│   ├── core/                  # Core utilities
-│   │   ├── logging_config.py  # Logging setup
-│   │   ├── middleware.py      # Custom middleware
-│   │   └── utils.py           # Helper functions
-│   ├── models/                # Data models
-│   │   └── schemas.py         # Pydantic schemas
-│   └── services/              # Business logic
-│       ├── body_detection.py  # Body detection service
-│       ├── image_collage.py   # Image collage creation
-│       ├── pipeline.py        # Try-on pipeline orchestration
-│       └── recommendation.py  # AI recommendation engine
-├── ml_engine/                 # ML model management
-│   ├── loader.py              # Model loading and caching
-│   ├── pipelines/             # ML pipeline implementations
-│   │   ├── body_gen.py        # SDXL body generation
-│   │   ├── pose.py            # Pose estimation
-│   │   ├── reconstruction.py  # 3D reconstruction (PIFuHD)
-│   │   ├── segmentation.py    # Image segmentation
-│   │   └── idm_vton.py        # Virtual try-on (CatVTON)
-│   └── weights/               # Model weights storage
-├── main.py                    # FastAPI application entry
-├── requirements.txt
-└── Dockerfile
+│   ├── api/                       # API route handlers
+│   │   ├── endpoints.py           # Core endpoints (recommend, try-on, batch)
+│   │   ├── body_generation.py     # Body model generation (SDXL)
+│   │   ├── image_analysis.py      # Image type detection
+│   │   ├── image_composition.py   # Head-body composition
+│   │   ├── garment_management.py  # Wardrobe CRUD operations
+│   │   ├── identity_body.py       # Identity-preserving body generation
+│   │   └── reconstruction_3d.py   # 3D mesh reconstruction
+│   ├── core/                      # Core utilities
+│   │   ├── auth.py                # JWT authentication (Supabase)
+│   │   ├── cache_manager.py       # Model cache management
+│   │   ├── error_context.py       # Error logging with context
+│   │   ├── error_handler.py       # Centralized error handling
+│   │   ├── exceptions.py          # Custom exception classes
+│   │   ├── file_validator.py      # File upload validation
+│   │   ├── logging_config.py      # Structured logging setup
+│   │   ├── middleware.py          # Request logging middleware
+│   │   ├── oom_handler.py         # GPU OOM detection & recovery
+│   │   ├── performance_metrics.py # Performance tracking
+│   │   ├── utils.py               # Helper functions
+│   │   └── ERROR_HANDLING_GUIDE.md # Error handling documentation
+│   ├── models/                    # Data models
+│   │   └── schemas.py             # Pydantic schemas
+│   └── services/                  # Business logic
+│       ├── body_detection.py      # Body type detection
+│       ├── body_generation.py     # Body generation service
+│       ├── face_analysis.py       # Face detection & analysis
+│       ├── image_collage.py       # Image collage creation
+│       ├── recommendation.py      # AI recommendation engine (Gemini)
+│       ├── supabase_storage.py    # Supabase storage & DB operations
+│       ├── temp_file_manager.py   # Temporary file cleanup
+│       └── tryon_service.py       # Try-on orchestration (Leffa)
+├── ml_engine/                     # ML model management
+│   ├── loader.py                  # Model loading & caching (singleton)
+│   └── pipelines/                 # ML pipeline implementations
+│       ├── body_gen.py            # SDXL body generation
+│       ├── leffa_tryon.py         # Leffa virtual try-on
+│       ├── reconstruction_3d.py   # 3D reconstruction (TripoSR)
+│       └── segmentation.py        # SAM 2.1 segmentation
+├── 3d/                            # 3D reconstruction components
+│   ├── SETUP.md                   # 3D setup guide (CUDA, torchmcubes)
+│   ├── TripoSR/                   # TripoSR repository (submodule)
+│   ├── models/                    # SAM 2.1 model weights
+│   └── outputs/                   # Generated 3D meshes
+├── database_migrations/           # SQL migration scripts
+│   └── 001_add_metadata_fields.sql
+├── scripts/                       # Utility scripts
+│   └── verify_environment.py      # Environment verification
+├── tests/                         # Test suite
+├── logs/                          # Application logs
+├── main.py                        # FastAPI application entry
+├── requirements.txt               # Python dependencies
+├── .env                           # Environment variables
+├── .env.example                   # Environment template
+├── database_schema.sql            # Database schema
+├── database_schema_complete.sql   # Complete schema with all tables
+└── verification_report.json       # Environment verification report
 ```
 
 ## Data Directory

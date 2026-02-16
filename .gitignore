@@ -1,14 +1,257 @@
-node_modules
-__pycache__
+# =============================================================================
+# Virtual Try-On Platform - Git Ignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Python
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# -----------------------------------------------------------------------------
+# Virtual Environments
+# -----------------------------------------------------------------------------
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# -----------------------------------------------------------------------------
+# Environment Variables & Secrets
+# -----------------------------------------------------------------------------
 .env
-.next
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# -----------------------------------------------------------------------------
+# Node.js / Frontend
+# -----------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+.next/
+out/
+.nuxt
 dist
-build
-*.log
-data/uploads/*
-data/results/*
-!data/uploads/.gitkeep
-!data/results/.gitkeep
+.cache/
+.parcel-cache
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+
+# -----------------------------------------------------------------------------
+# ML Models & Checkpoints (LARGE FILES - DO NOT COMMIT)
+# -----------------------------------------------------------------------------
+# Leffa checkpoints (auto-downloaded from HuggingFace)
+Leffa/ckpts/*
+!Leffa/ckpts/.gitkeep
+
+# SAM2 model weights
+backend/3d/models/*.pt
+backend/3d/models/*.pth
+backend/3d/models/*.safetensors
+!backend/3d/models/.gitkeep
+
+# TripoSR cached models (downloaded from HuggingFace)
+backend/3d/TripoSR/ckpts/
+backend/3d/TripoSR/weights/
+
+# HuggingFace cache (models auto-download here)
+.cache/
+huggingface/
+transformers_cache/
+~/.cache/huggingface/
+
+# InstantID models
+backend/ml_engine/weights/InstantID/
+backend/ml_engine/weights/ControlNet/
+backend/ml_engine/weights/IP-Adapter/
+backend/ml_engine/weights/antelopev2/
 !backend/ml_engine/weights/.gitkeep
-.kiro
-.vscode
+
+# SDXL models (auto-downloaded)
+backend/ml_engine/weights/sdxl/
+backend/ml_engine/weights/stable-diffusion/
+
+# Depth Anything V2 models (auto-downloaded)
+backend/ml_engine/weights/depth-anything/
+
+# Any other model weights
+*.ckpt
+*.safetensors
+*.bin
+*.pth
+*.pt
+!**/requirements.txt
+
+# -----------------------------------------------------------------------------
+# Generated Data & Outputs (DO NOT COMMIT)
+# -----------------------------------------------------------------------------
+# User uploads
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Generated results
+data/results/*
+!data/results/.gitkeep
+
+# Temporary files
+data/temp/*
+!data/temp/.gitkeep
+
+# Backend data
+backend/data/*
+!backend/data/.gitkeep
+
+# 3D outputs
+backend/3d/outputs/*.glb
+backend/3d/outputs/*.obj
+backend/3d/outputs/*.ply
+backend/3d/outputs/*.mtl
+backend/3d/outputs/*.png
+!backend/3d/outputs/.gitkeep
+
+# -----------------------------------------------------------------------------
+# Logs
+# -----------------------------------------------------------------------------
+logs/
+*.log
+backend/logs/*
+!backend/logs/.gitkeep
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -----------------------------------------------------------------------------
+# IDE & Editor
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Kiro AI Assistant
+.kiro/
+!.kiro/steering/
+!.kiro/specs/
+
+# -----------------------------------------------------------------------------
+# Testing & Coverage
+# -----------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# -----------------------------------------------------------------------------
+# Database
+# -----------------------------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+
+# -----------------------------------------------------------------------------
+# OS
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# -----------------------------------------------------------------------------
+# Compiled Extensions
+# -----------------------------------------------------------------------------
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+
+# -----------------------------------------------------------------------------
+# Jupyter Notebooks
+# -----------------------------------------------------------------------------
+.ipynb_checkpoints
+*.ipynb
+
+# -----------------------------------------------------------------------------
+# Documentation Build
+# -----------------------------------------------------------------------------
+docs/_build/
+docs/.doctrees/
+site/
+
+# -----------------------------------------------------------------------------
+# Backup Files
+# -----------------------------------------------------------------------------
+*.bak
+*.backup
+*.old
+*.orig
+*~
+
+# -----------------------------------------------------------------------------
+# Verification & Test Reports
+# -----------------------------------------------------------------------------
+verification_report.json
+baseline_test_results.json
+package_report.json
+
+# -----------------------------------------------------------------------------
+# Git Submodules (keep .gitmodules but ignore submodule contents)
+# -----------------------------------------------------------------------------
+# Leffa is a git submodule - keep the reference but ignore its .git
+Leffa/.git/
+backend/3d/TripoSR/.git/
+backend/3d/NVTX/.git/
+
+# -----------------------------------------------------------------------------
+# Keep Important Files
+# -----------------------------------------------------------------------------
+!.gitkeep
+!.gitignore
+!README.md
+!LICENSE
+!requirements.txt
+!package.json
+!.env.example

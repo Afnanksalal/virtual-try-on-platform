@@ -9,7 +9,9 @@ import type {
   StorageObject,
   GarmentType,
   ModelType,
-  TryOnOptions 
+  TryOnOptions,
+  BodyAnalysisResponse,
+  ThreeDGenerationResponse
 } from './types';
 
 // Type definitions
@@ -163,8 +165,34 @@ export const endpoints = {
   health: (): Promise<HealthCheckResponse> => 
     api.get("/api/v1/health"),
 
+  // Body Analysis (NEW - Task 15.1)
+  analyzeBodyType: (image: File): Promise<BodyAnalysisResponse> => {
+    const formData = new FormData();
+    formData.append("image", image);
+    return api.post("/api/v1/analyze-body", formData);
+  },
+
+  // 3D Generation (NEW - Task 15.1)
+  generate3D: (tryonResultUrl: string, outputFormat: 'glb' | 'obj' | 'ply' = 'glb'): Promise<ThreeDGenerationResponse> => {
+    const formData = new FormData();
+    formData.append("tryon_result_url", tryonResultUrl);
+    formData.append("output_format", outputFormat);
+    return api.post("/api/v1/generate-3d", formData, {
+      timeout: LONG_TIMEOUT, // 3D generation can take time
+    });
+  },
+
+  // 3D Download (NEW - Task 15.1)
+  download3D: async (token: string): Promise<Blob> => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/download-3d/${token}`);
+    if (!response.ok) {
+      throw new APIError(response.status, 'Failed to download 3D model');
+    }
+    return await response.blob();
+  },
+
   // ML Operations Only
-  getRecommendations: (
+  getRecommendations: async (
     userPhoto: File,
     wardrobeImages?: File[],
     generatedImages?: File[],
@@ -200,7 +228,24 @@ export const endpoints = {
       if (userProfile.style_preference) formData.append("style_preference", userProfile.style_preference);
     }
     
-    return api.post("/api/v1/recommend", formData);
+    const response = await api.post<{ recommendations: Recommendation[]; count: number; sources: any }>("/api/v1/recommend", formData);
+    
+    // Validate response structure
+    if (!response || typeof response !== 'object') {
+      console.error('Invalid response from recommendations API:', response);
+      return [];
+    }
+    
+    // Extract recommendations array from response object
+    const recommendations = response.recommendations;
+    
+    // Ensure we return an array
+    if (!Array.isArray(recommendations)) {
+      console.error('Recommendations is not an array:', recommendations);
+      return [];
+    }
+    
+    return recommendations;
   },
 
   processTryOn: (

@@ -18,7 +18,7 @@ interface Tab {
 
 const tabs: Tab[] = [
   { id: 'personal', label: 'Personal Image', ariaLabel: 'Personal Image tab' },
-  { id: 'garment', label: 'Garment', ariaLabel: 'Garment tab' },
+  { id: 'garment', label: 'Wardrobe', ariaLabel: 'Wardrobe tab' },
   { id: 'results', label: 'Try-On Results', ariaLabel: 'Try-On Results tab' },
   { id: 'recommendations', label: 'Recommendations', ariaLabel: 'Recommendations tab' },
 ];

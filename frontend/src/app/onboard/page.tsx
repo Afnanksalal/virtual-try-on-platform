@@ -87,7 +87,10 @@ export default function OnboardPage() {
     if (savedProgress) {
       try {
         const progress = JSON.parse(savedProgress);
-        if (progress.currentStep && progress.currentStep !== "complete") {
+        
+        // Don't resume from transient/processing steps
+        const transientSteps: Step[] = ["analyzing", "generating", "complete"];
+        if (progress.currentStep && !transientSteps.includes(progress.currentStep)) {
           setCurrentStep(progress.currentStep);
           if (progress.bodyParameters) {
             setBodyParameters(progress.bodyParameters);
@@ -96,9 +99,14 @@ export default function OnboardPage() {
             setImageAnalysis(progress.imageAnalysis);
           }
           toast.info("Resuming your onboarding progress");
+        } else if (transientSteps.includes(progress.currentStep)) {
+          // If we were in a transient step, clear cache and start fresh
+          localStorage.removeItem("onboarding_progress");
+          toast.info("Starting fresh onboarding");
         }
       } catch (error) {
         console.error("Failed to load progress:", error);
+        localStorage.removeItem("onboarding_progress");
       }
     }
   }, []);
@@ -189,15 +197,15 @@ export default function OnboardPage() {
     setLoading(true);
     
     try {
-      // Analyze if head-only or full-body
-      const analysis = await endpoints.analyzeImage(file);
+      // Use the new unified body analysis endpoint (Task 15.4)
+      const analysis = await endpoints.analyzeBodyType(file);
       setImageAnalysis({
-        type: analysis.type,
-        confidence: analysis.confidence || 0.9
+        type: analysis.body_type === 'full_body' ? 'full_body' : 'head_only',
+        confidence: analysis.confidence
       });
       
-      if (analysis.type === "head_only") {
-        toast.info("Head-only photo detected! Let's set up your body parameters.", { duration: 4000 });
+      if (analysis.body_type === 'partial_body') {
+        toast.info("Partial body photo detected! Let's set up your body parameters.", { duration: 4000 });
         setCurrentStep("parameters");
       } else {
         toast.success("Full-body photo detected! Let's collect some basic info.", { duration: 3000 });
@@ -266,6 +274,10 @@ export default function OnboardPage() {
     } catch (error) {
       console.error("Body generation error:", error);
       toast.error("Failed to generate bodies. Please try again.");
+      
+      // Clear cached progress to prevent resuming from failed state
+      localStorage.removeItem("onboarding_progress");
+      
       setCurrentStep("parameters");
     } finally {
       setLoading(false);
@@ -607,21 +619,47 @@ export default function OnboardPage() {
                           ? "bg-blue-50 border-blue-200" 
                           : "bg-green-50 border-green-200"
                       }`}>
-                        <p className={`text-sm ${
-                          imageAnalysis.type === "head_only" 
-                            ? "text-blue-900" 
-                            : "text-green-900"
-                        }`}>
-                          {imageAnalysis.type === "head_only" ? (
-                            <>
-                              <strong>Head-only photo detected!</strong> AI will create a full-body digital twin that naturally preserves your face.
-                            </>
-                          ) : (
-                            <>
-                              <strong>Full-body photo detected!</strong> We&apos;ll use your photo directly for try-ons.
-                            </>
-                          )}
-                        </p>
+                        <div className="flex items-start gap-3">
+                          <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${
+                            imageAnalysis.type === "head_only" 
+                              ? "bg-blue-100" 
+                              : "bg-green-100"
+                          }`}>
+                            <User className={`h-5 w-5 ${
+                              imageAnalysis.type === "head_only" 
+                                ? "text-blue-600" 
+                                : "text-green-600"
+                            }`} />
+                          </div>
+                          <div className="flex-1">
+                            <p className={`text-sm font-semibold mb-1 ${
+                              imageAnalysis.type === "head_only" 
+                                ? "text-blue-900" 
+                                : "text-green-900"
+                            }`}>
+                              {imageAnalysis.type === "head_only" ? "Partial Body Detected" : "Full Body Detected"}
+                            </p>
+                            <p className={`text-xs ${
+                              imageAnalysis.type === "head_only" 
+                                ? "text-blue-800" 
+                                : "text-green-800"
+                            }`}>
+                              {imageAnalysis.type === "head_only" ? (
+                                <>
+                                  AI will create a full-body digital twin that naturally preserves your face. 
+                                  Please provide your body parameters below.
+                                </>
+                              ) : (
+                                <>
+                                  We&apos;ll use your photo directly for try-ons. Just fill in some basic info.
+                                </>
+                              )}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Confidence: {Math.round(imageAnalysis.confidence * 100)}%
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     )}
 

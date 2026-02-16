@@ -1,0 +1,3 @@
+# ML model weights directory
+# Models are auto-downloaded from HuggingFace
+# Keep this directory in git but ignore model files

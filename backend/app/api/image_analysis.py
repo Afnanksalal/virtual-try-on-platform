@@ -7,6 +7,8 @@ import os
 import json
 from ..core.logging_config import get_logger
 from ..core.file_validator import FileValidator
+from ..services.body_generation import get_body_generation_service
+from ..models.schemas import BodyAnalysisResponse
 
 router = APIRouter()
 logger = get_logger("api.image_analysis")
@@ -27,11 +29,72 @@ def get_gemini_client():
         _gemini_client = genai.Client(api_key=gemini_key)
     return _gemini_client
 
+@router.post("/analyze-body", response_model=BodyAnalysisResponse)
+async def analyze_body(image: UploadFile = File(...)):
+    """
+    Analyze if uploaded image contains full body or partial body using pose detection.
+    
+    This endpoint uses the BodyGenerationService to detect body coverage based on
+    pose estimation and keypoint detection. It determines whether the image shows
+    a complete body (including legs/feet) or just head/upper body.
+    
+    Args:
+        image: Uploaded image file (JPEG, PNG, or WebP)
+        
+    Returns:
+        BodyAnalysisResponse with:
+        - body_type: "full_body" or "partial_body"
+        - is_full_body: Boolean flag
+        - confidence: Confidence score (0.0-1.0)
+        - coverage_metric: Body coverage metric
+        - error: Optional error message if analysis had issues
+        
+    Raises:
+        HTTPException 400: Invalid file type or size
+        HTTPException 500: Analysis failed
+    """
+    try:
+        logger.info("Body analysis request received")
+        
+        # Validate uploaded file
+        await file_validator.validate_file(image)
+        
+        # Read and load image
+        image_bytes = await image.read()
+        img = Image.open(io.BytesIO(image_bytes))
+        
+        logger.info(f"Image loaded: {img.size[0]}x{img.size[1]} pixels")
+        
+        # Get body generation service
+        body_service = get_body_generation_service()
+        
+        # Analyze body type
+        analysis_result = body_service.analyze_body_type(img)
+        
+        logger.info(
+            f"Body analysis complete: {analysis_result['body_type']} "
+            f"(confidence: {analysis_result['confidence']:.2f})"
+        )
+        
+        # Return structured response
+        return BodyAnalysisResponse(**analysis_result)
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(400, f"Invalid input: {str(e)}")
+    except Exception as e:
+        logger.error(f"Body analysis failed: {e}", exc_info=True)
+        raise HTTPException(500, f"Body analysis failed: {str(e)}")
+
+
 @router.post("/analyze-image")
 async def analyze_image(image: UploadFile = File(...)):
     """
     Use Gemini Vision API to detect if uploaded image is head-only or full-body.
     Returns: {"type": "head_only" | "full_body", "confidence": 0-1}
+    
+    NOTE: This endpoint uses Gemini Vision for analysis. For pose-based detection,
+    use /analyze-body instead.
     """
     try:
         client = get_gemini_client()

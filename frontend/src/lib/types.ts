@@ -202,3 +202,57 @@ export interface HealthCheckResponse {
     };
   };
 }
+
+// Body Analysis Types (NEW - Task 15.1)
+export interface BodyAnalysisRequest {
+  image: File;
+}
+
+export interface BodyAnalysisResponse {
+  body_type: 'full_body' | 'partial_body';
+  confidence: number;
+}
+
+// 3D Generation Types (NEW - Task 15.1)
+export interface ThreeDGenerationRequest {
+  tryon_result_url: string;
+  output_format?: 'glb' | 'obj' | 'ply';
+}
+
+export interface ThreeDGenerationResponse {
+  download_token: string;
+  download_url: string;
+  expires_at: string;
+  format: string;
+  file_size_bytes: number;
+  processing_time: number;
+  metadata?: {
+    request_id: string;
+    use_segmentation: boolean;
+    mc_resolution: number;
+    image_size: string;
+    intermediate_images?: {
+      depth_map?: { token: string; url: string };
+      segmented_rgba?: { token: string; url: string };
+      mask_visualization?: { token: string; url: string };
+    };
+  };
+}
+
+export interface ThreeDDownloadToken {
+  token: string;
+  expires_at: string;
+}
+
+// 3D Model Viewer Types (NEW - Task 15.1)
+export interface ThreeDModel {
+  url: string;
+  format: 'glb' | 'obj' | 'ply';
+  downloadToken?: string;
+  expiresAt?: Date;
+  intermediateImages?: {
+    depth_map?: string;
+    segmented_rgba?: string;
+    mask_visualization?: string;
+  };
+}

@@ -1,11 +1,20 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 import os
 import torch
 from dotenv import load_dotenv
 from app.core.logging_config import setup_logging, get_logger
 from app.core.middleware import RequestLoggingMiddleware
+from app.core.error_handler import (
+    app_exception_handler,
+    validation_exception_handler,
+    http_exception_handler,
+    generic_exception_handler
+)
+from app.core.exceptions import AppException
 from contextlib import asynccontextmanager
 
 # Load environment variables from .env file
@@ -52,6 +61,30 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to preload/warmup models: {e}", exc_info=True)
         logger.warning("API will start but models will be loaded on first request")
     
+    # Start temporary file cleanup background task
+    from app.services.temp_file_manager import TempFileManager
+    import asyncio
+    
+    temp_file_manager = TempFileManager()
+    cleanup_task = None
+    
+    async def periodic_cleanup():
+        """Run cleanup every 15 minutes."""
+        while True:
+            try:
+                await asyncio.sleep(900)  # 15 minutes = 900 seconds
+                deleted_count = temp_file_manager.cleanup_expired_files()
+                if deleted_count > 0:
+                    logger.info(f"Background cleanup: removed {deleted_count} expired temp files")
+            except asyncio.CancelledError:
+                logger.info("Cleanup task cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in cleanup task: {e}", exc_info=True)
+    
+    cleanup_task = asyncio.create_task(periodic_cleanup())
+    logger.info("Started background task for temporary file cleanup (runs every 15 minutes)")
+    
     logger.info("=" * 60)
     logger.info("Virtual Try-On ML API is ready!")
     logger.info("=" * 60)
@@ -60,6 +93,15 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down Virtual Try-On ML API...")
+    
+    # Cancel cleanup task
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Stopped background cleanup task")
 
 app = FastAPI(
     title="Virtual Try-On ML API",
@@ -93,12 +135,19 @@ app.add_middleware(
 # Add custom middleware
 app.add_middleware(RequestLoggingMiddleware)
 
+# Register exception handlers
+app.add_exception_handler(AppException, app_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
+
 from app.api.endpoints import router as api_router
 from app.api.body_generation import router as body_gen_router
 from app.api.image_analysis import router as image_analysis_router
 from app.api.image_composition import router as image_composition_router
 from app.api.garment_management import router as garment_router
 from app.api.identity_body import router as identity_body_router
+from app.api.reconstruction_3d import router as reconstruction_3d_router
 
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(body_gen_router, prefix="/api/v1")
@@ -106,6 +155,7 @@ app.include_router(image_analysis_router, prefix="/api/v1")
 app.include_router(image_composition_router, prefix="/api/v1")
 app.include_router(garment_router, prefix="/api/v1")
 app.include_router(identity_body_router, prefix="/api/v1")
+app.include_router(reconstruction_3d_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

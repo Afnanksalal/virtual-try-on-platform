@@ -9,67 +9,87 @@
 
 **Styling**: 
 - Tailwind CSS 4
-- Framer Motion for animations
-- Lucide React for icons
+- Framer Motion 12.26.2 for animations
+- Lucide React 0.562.0 for icons
+- Plus Jakarta Sans font
 
 **3D Graphics**:
-- Three.js
-- React Three Fiber
-- React Three Drei
+- Three.js 0.182.0
+- React Three Fiber 9.5.0
+- React Three Drei 10.7.7
 
 **State & UI**:
-- Sonner for toast notifications
+- Sonner 2.0.7 for toast notifications
 - clsx + tailwind-merge for className utilities
+- file-saver 2.0.5 for downloads
 
-**Authentication**: Supabase client (@supabase/supabase-js)
+**Authentication**: Supabase client 2.90.1 (@supabase/supabase-js)
 
 **Development**:
-- ESLint with Next.js config
-- React Compiler (Babel plugin)
+- ESLint 9 with Next.js config
+- React Compiler (Babel plugin 1.0.0)
 
 ## Backend
 
-**Framework**: FastAPI 0.115.6
-- Uvicorn ASGI server 0.34.0
-- Pydantic 2.10.5 for data validation
-- Python-multipart for file uploads
+**Framework**: FastAPI 0.128.5
+- Uvicorn 0.40.0 ASGI server
+- Pydantic 2.12.5 for data validation
+- Python-multipart 0.0.22 for file uploads
+- Python 3.10.x
 
 **ML/AI Stack**:
-- PyTorch 2.4.0 + TorchVision 0.19.0
-- Diffusers (latest from git)
-- Transformers 4.46.3
-- Accelerate 0.31.0
-- xformers 0.0.29.post1 (memory-efficient attention)
-- safetensors 0.4.5
-- huggingface-hub 0.25.0
+- PyTorch 2.6.0+cu124 + TorchVision 0.21.0+cu124
+- Diffusers 0.36.0
+- Transformers 5.1.0
+- Accelerate 1.12.0
+- safetensors 0.7.0
+- huggingface-hub 1.4.1
+- PEFT 0.18.1 (Parameter-Efficient Fine-Tuning)
 
-**Virtual Try-On**:
-- CatVTON (zhengchong/CatVTON)
-  - Lightweight: 899M parameters, 49.57M trainable
-  - Memory efficient: <8GB VRAM for 1024x768
-  - Auto-masking: DensePose + SCHP
-  - No text prompts or pose estimation needed
-- PEFT 0.14.0 (Parameter-Efficient Fine-Tuning)
-- Gradio 4.41.0 (for CatVTON compatibility)
+**2D Virtual Try-On (Leffa)**:
+- Leffa repository (cloned at project root)
+- Auto-downloads checkpoints from HuggingFace (franciszzj/Leffa)
+- Supports upper_body, lower_body, and dresses
+- Model variants: viton_hd (recommended), dress_code
+- Advanced options: ref_acceleration, repaint mode
+
+**3D Reconstruction**:
+- TripoSR (stabilityai/TripoSR)
+- SAM 2.1 (facebook/sam2.1-hiera-large) for segmentation
+- Depth Anything V2 (depth-anything/Depth-Anything-V2-Large-hf)
+- torchmcubes (compiled from source)
+- open3d 0.19.0, trimesh 4.0.5, pymeshlab 2025.7.post1
+
+**Body Generation**:
+- SDXL via Diffusers for generic body generation
+- **InstantID** (InstantX/InstantID) for identity-preserving generation
+  - InsightFace 0.7.3 (antelopev2) for face embedding extraction
+  - ControlNet for facial keypoint guidance
+  - IP-Adapter for identity injection into diffusion process
+  - Albumentations 1.4.23 for image augmentation
+- Supports ethnicity, body type, height, weight parameters
+- Gemini Vision for facial feature analysis (skin tone, ethnicity)
 
 **Image Processing**:
-- Pillow 11.1.0
-- NumPy 2.2.2
-- OpenCV 4.10.0.84
+- Pillow 10.1.0
+- NumPy 1.26.4
+- OpenCV 4.11.0.86
+- rembg 2.0.69 for background removal
+- segment-anything 1.0
 
 **AI Services**:
-- Google Gen AI SDK 1.10.0 (Gemini 2.5 Flash - stable production model)
-  - Uses new `google-genai` package (GA as of May 2025)
-  - Replaces deprecated `google-generativeai` package
-  - Supports multimodal inputs (text, images, audio, video)
-  - Uses `types.Part.from_bytes()` for inline image data
+- Google Gen AI SDK 1.10.0+ (Gemini 2.5 Flash)
+  - Uses `google-genai` package (GA as of May 2025)
+  - Replaces deprecated `google-generativeai`
+  - Multimodal support (text, images, audio, video)
 - Supabase 2.14.0 (Storage, Auth, Database)
 
 **Infrastructure**:
-- Docker + Docker Compose
-- NVIDIA GPU support (CUDA)
+- CUDA 12.4 (required for GPU support)
 - CORS middleware for cross-origin requests
-- Custom logging and request middleware
+- Comprehensive error handling system
+- Structured logging with coloredlogs
+- Background task for temp file cleanup (15 min intervals)
 
 ## Environment Variables
 
@@ -85,9 +105,12 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-supabase-key>
 SUPABASE_URL=<your-supabase-url>
 SUPABASE_KEY=<your-supabase-key>
 GEMINI_API_KEY=<your-gemini-key>
+HUGGINGFACE_TOKEN=<your-huggingface-token>
 USE_GPU=true
 LOG_LEVEL=INFO
 ALLOWED_ORIGINS=http://localhost:3000
+WARMUP_MODELS=true
+PRELOAD_MODELS=tryon,segmentation
 ```
 
 ## Common Commands
@@ -125,14 +148,35 @@ docker-compose down                # Stop services
 
 Base URL: `http://localhost:8000/api/v1`
 
-- `GET /health` - Health check
-- `POST /recommend` - Get AI outfit recommendations
-- `POST /process-tryon` - Virtual try-on processing
-- `POST /generate-body` - Generate body models
-- `POST /generate-bodies` - Generate multiple body variations
-- `POST /analyze-image` - Analyze if image is head-only or full-body
+**Core Endpoints**:
+- `GET /health` - Health check (GPU, Leffa, Gemini, memory)
+- `POST /recommend` - AI outfit recommendations (Gemini + eBay)
+- `POST /process-tryon` - 2D virtual try-on (Leffa)
+- `POST /process-tryon-batch` - Batch try-on (multiple garments)
+
+**Body Generation**:
+- `POST /generate-bodies` - Generate body variations (SDXL)
+- `POST /generate-full-body` - Generate full body with identity (legacy)
+- `POST /generate-identity-body` - Identity-preserving generation (InstantID)
+- `POST /analyze-face-features` - Analyze facial features with Gemini
+
+**Image Analysis**:
+- `POST /analyze-body` - Detect if image is head-only or full-body
 - `POST /combine-head-body` - Combine head with generated body
+
+**3D Reconstruction**:
+- `POST /reconstruct-3d` - Generate 3D mesh from image
+
+**Wardrobe & History**:
+- `GET /wardrobe/{user_id}` - Get user's garment collection
+- `GET /tryon/history/{user_id}` - Get try-on history
+- `POST /garments/upload` - Upload garment to wardrobe
+- `DELETE /garments/{garment_id}` - Delete garment
 
 ## GPU Requirements
 
-Backend requires NVIDIA GPU with CUDA support for optimal performance. CPU fallback available but significantly slower.
+**Minimum**: NVIDIA GPU with 4GB VRAM (tested on RTX 3050 4GB)
+**Recommended**: 8GB+ VRAM for optimal performance
+**CUDA**: 12.4 (required for PyTorch 2.6.0+cu124)
+
+CPU fallback available but significantly slower (10-20x).

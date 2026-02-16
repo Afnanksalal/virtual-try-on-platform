@@ -31,12 +31,6 @@ export default function Recommendations() {
     setFailedImages(prev => new Set([...prev, id]));
   };
 
-export default function Recommendations() {
-  const [recs, setRecs] = useState<Recommendation[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<Recommendation | null>(null);
-
   useEffect(() => {
     loadRecommendations();
   }, []);
@@ -66,6 +60,16 @@ export default function Recommendations() {
       const photoFile = new File([photoBlob], 'user_photo.jpg', { type: 'image/jpeg' });
 
       const recommendations = await endpoints.getRecommendations(photoFile);
+      
+      // Validate that we received an array
+      if (!Array.isArray(recommendations)) {
+        console.error("Invalid recommendations response:", recommendations);
+        toast.error("Received invalid recommendations format");
+        setRecs([]);
+        return;
+      }
+      
+      console.log(`Loaded ${recommendations.length} recommendations`);
       setRecs(recommendations);
       
     } catch (error) {
@@ -75,6 +79,7 @@ export default function Recommendations() {
       } else {
         toast.error("Failed to load recommendations");
       }
+      setRecs([]); // Ensure we set empty array on error
     } finally {
       setLoading(false);
     }

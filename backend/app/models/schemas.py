@@ -75,6 +75,14 @@ class TryOnResponse(StrictBaseModel):
     cached: bool = False
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+# Body analysis schemas
+class BodyAnalysisResponse(StrictBaseModel):
+    body_type: str = Field(..., pattern="^(full_body|partial_body)$")
+    is_full_body: bool
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    coverage_metric: float = Field(..., ge=0.0)
+    error: Optional[str] = None
+
 # Body generation schemas
 class BodyGenerationRequest(StrictBaseModel):
     ethnicity: Ethnicity
@@ -102,6 +110,41 @@ class BodyGenerationResponse(StrictBaseModel):
     result_urls: List[str]
     processing_time: float = Field(..., ge=0)
     count: int = Field(..., ge=1)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+# Full body generation schemas (from partial image)
+class FullBodyGenerationRequest(StrictBaseModel):
+    ethnicity: Optional[Ethnicity] = None  # Optional, Gemini can infer
+    body_type: BodyType
+    height_cm: Optional[float] = Field(None, ge=140, le=220)
+    weight_kg: Optional[float] = Field(None, ge=40, le=200)
+    gender: Optional[Gender] = None
+    pose: str = Field(default="standing", max_length=100)
+    clothing: str = Field(default="casual minimal clothing", max_length=200)
+    num_inference_steps: int = Field(default=4, ge=1, le=50)
+    guidance_scale: float = Field(default=0.0, ge=0.0, le=20.0)
+    seed: int = Field(default=42, ge=0)
+    
+    @field_validator('height_cm')
+    @classmethod
+    def validate_height(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and not 140 <= v <= 220:
+            raise ValueError("Height must be between 140-220 cm")
+        return v
+    
+    @field_validator('weight_kg')
+    @classmethod
+    def validate_weight(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and not 40 <= v <= 200:
+            raise ValueError("Weight must be between 40-200 kg")
+        return v
+
+class FullBodyGenerationResponse(StrictBaseModel):
+    result_url: str
+    request_id: str
+    processing_time: float = Field(..., ge=0)
+    face_analysis: Dict[str, Any] = Field(default_factory=dict)
+    generation_prompt: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 # Recommendation schemas
@@ -247,3 +290,32 @@ class AppConfig(StrictBaseModel):
             if "*" in v.allowed_origins:
                 raise ValueError("Wildcard CORS not allowed in production")
         return v
+
+# 3D Generation schemas
+class OutputFormat(str, Enum):
+    GLB = "glb"
+    OBJ = "obj"
+    PLY = "ply"
+
+class ThreeDGenerationRequest(StrictBaseModel):
+    output_format: OutputFormat = OutputFormat.GLB
+    use_segmentation: bool = True
+    mc_resolution: int = Field(default=256, ge=128, le=512)
+    
+    @field_validator('mc_resolution')
+    @classmethod
+    def validate_mc_resolution(cls, v: int) -> int:
+        # Warn if resolution is too high for 4GB VRAM
+        if v > 256:
+            # This is just validation, actual warning should be in the endpoint
+            pass
+        return v
+
+class ThreeDGenerationResponse(StrictBaseModel):
+    download_token: str = Field(..., min_length=1)
+    download_url: str = Field(..., min_length=1)
+    expires_at: str = Field(..., min_length=1)
+    format: str = Field(..., pattern="^(glb|obj|ply)$")
+    file_size_bytes: int = Field(..., ge=0)
+    processing_time: float = Field(..., ge=0)
+    metadata: Dict[str, Any] = Field(default_factory=dict)

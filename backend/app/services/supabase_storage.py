@@ -6,8 +6,11 @@ NO local file storage allowed.
 import os
 import io
 import uuid
+import time
+import asyncio
 from datetime import datetime
-from typing import Optional, BinaryIO, List, Dict, Any
+from typing import Optional, BinaryIO, List, Dict, Any, Callable
+from functools import wraps
 from PIL import Image
 from fastapi import UploadFile
 from supabase import create_client, Client
@@ -21,6 +24,64 @@ from ..core.exceptions import (
 from ..core.file_validator import FileValidator
 
 logger = get_logger("services.supabase_storage")
+
+
+def retry_on_failure(max_attempts: int = 3, delay_seconds: float = 1.0, backoff_multiplier: float = 2.0):
+    """
+    Decorator to retry a function on transient failures.
+    
+    Implements exponential backoff for network-related errors.
+    
+    Args:
+        max_attempts: Maximum number of retry attempts (default: 3)
+        delay_seconds: Initial delay between retries in seconds (default: 1.0)
+        backoff_multiplier: Multiplier for exponential backoff (default: 2.0)
+        
+    Returns:
+        Decorated function with retry logic
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            current_delay = delay_seconds
+            
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    error_str = str(e).lower()
+                    
+                    # Check if it's a transient error worth retrying
+                    is_transient = any(keyword in error_str for keyword in [
+                        'timeout', 'connection', 'network', 'temporary',
+                        'unavailable', 'service', '503', '502', '504'
+                    ])
+                    
+                    if not is_transient or attempt >= max_attempts:
+                        # Not a transient error or max attempts reached
+                        logger.error(
+                            f"{func.__name__} failed after {attempt} attempt(s): {e}",
+                            exc_info=True
+                        )
+                        raise
+                    
+                    # Log retry attempt
+                    logger.warning(
+                        f"{func.__name__} failed (attempt {attempt}/{max_attempts}), "
+                        f"retrying in {current_delay:.1f}s: {e}"
+                    )
+                    
+                    # Wait before retry with exponential backoff
+                    time.sleep(current_delay)
+                    current_delay *= backoff_multiplier
+            
+            # Should never reach here, but just in case
+            raise last_exception
+        
+        return wrapper
+    return decorator
 
 
 class SupabaseStorageService:
@@ -51,6 +112,7 @@ class SupabaseStorageService:
         # Initialize file validator
         self.file_validator = FileValidator(max_size_mb=10)
     
+    @retry_on_failure(max_attempts=3, delay_seconds=1.0, backoff_multiplier=2.0)
     def upload_image(
         self,
         image: Image.Image,
@@ -61,7 +123,9 @@ class SupabaseStorageService:
         quality: int = 85
     ) -> str:
         """
-        Upload PIL Image to Supabase storage with automatic compression.
+        Upload PIL Image to Supabase storage with automatic compression and retry logic.
+        
+        Retries up to 3 times on transient network failures with exponential backoff.
         
         Args:
             image: PIL Image object
@@ -73,6 +137,9 @@ class SupabaseStorageService:
             
         Returns:
             Public URL of uploaded file
+            
+        Raises:
+            RuntimeError: If upload fails after all retry attempts
         """
         try:
             # Compress image if needed
@@ -102,7 +169,7 @@ class SupabaseStorageService:
             
             logger.info(f"Compressed image to {file_size_mb:.2f}MB for upload")
             
-            # Upload to Supabase
+            # Upload to Supabase (will retry on transient failures)
             response = self.client.storage.from_(bucket).upload(
                 path=path,
                 file=file_data,
@@ -172,6 +239,7 @@ class SupabaseStorageService:
         
         return image
     
+    @retry_on_failure(max_attempts=3, delay_seconds=1.0, backoff_multiplier=2.0)
     def upload_bytes(
         self,
         file_data: bytes,
@@ -182,7 +250,9 @@ class SupabaseStorageService:
         max_size_mb: float = 5.0
     ) -> str:
         """
-        Upload raw bytes to Supabase storage with optional compression.
+        Upload raw bytes to Supabase storage with optional compression and retry logic.
+        
+        Retries up to 3 times on transient network failures with exponential backoff.
         
         Args:
             file_data: File bytes
@@ -194,6 +264,9 @@ class SupabaseStorageService:
             
         Returns:
             Public URL of uploaded file
+            
+        Raises:
+            RuntimeError: If upload fails after all retry attempts
         """
         try:
             # Compress if requested and it's an image
@@ -201,12 +274,12 @@ class SupabaseStorageService:
                 try:
                     # Convert bytes to PIL Image
                     image = Image.open(io.BytesIO(file_data))
-                    # Use upload_image for compression
+                    # Use upload_image for compression (which also has retry logic)
                     return self.upload_image(image, bucket, path, content_type, max_size_mb)
                 except Exception as e:
                     logger.warning(f"Failed to compress image, uploading as-is: {e}")
             
-            # Upload to Supabase
+            # Upload to Supabase (will retry on transient failures)
             response = self.client.storage.from_(bucket).upload(
                 path=path,
                 file=file_data,
@@ -367,9 +440,11 @@ class SupabaseStorageService:
         file: UploadFile
     ) -> Dict[str, Any]:
         """
-        Upload garment image to user-specific storage.
+        Upload garment image to user-specific storage with retry logic.
         
         Validates file before upload and stores in user-garments/{userId}/garments/
+        Supports JPEG, PNG, and WebP formats with clothing validation.
+        Retries up to 3 times on transient network failures.
         
         Args:
             user_id: User ID for storage isolation
@@ -382,20 +457,38 @@ class SupabaseStorageService:
             - name: Original filename
             - path: Storage path
             - uploaded_at: Upload timestamp
+            - size_mb: File size in MB
+            - content_type: MIME type
             
         Raises:
             FileTooLargeException: If file exceeds size limit
             InvalidMimeTypeException: If file type not allowed
-            StorageErrorException: If upload fails
+            StorageErrorException: If upload fails after all retry attempts
         """
         try:
-            # Validate file
+            # Validate file format (JPEG, PNG, WebP)
             validation_result = await self.file_validator.validate_file(file)
             
             if not validation_result.valid:
                 raise StorageErrorException(
                     operation="upload_garment",
                     reason=validation_result.error_message or "Validation failed"
+                )
+            
+            # Validate that the image contains clothing
+            # Read file content for validation
+            file_content = await file.read()
+            await file.seek(0)  # Reset for potential reuse
+            
+            # Validate clothing content using AI (optional, can be added later)
+            # For now, we rely on user upload and file format validation
+            is_valid_clothing = await self._validate_clothing_content(file_content, file.content_type)
+            
+            if not is_valid_clothing:
+                logger.warning(f"Clothing validation failed for user {user_id}")
+                raise StorageErrorException(
+                    operation="upload_garment",
+                    reason="Image does not appear to contain clothing items"
                 )
             
             # Generate unique filename
@@ -406,19 +499,53 @@ class SupabaseStorageService:
             # Construct storage path: user-garments/{userId}/garments/{unique_filename}
             storage_path = f"{user_id}/garments/{unique_filename}"
             
-            # Read file content
-            file_content = await file.read()
-            await file.seek(0)  # Reset for potential reuse
+            # Upload to Supabase with retry logic
+            max_attempts = 3
+            last_exception = None
             
-            # Upload to Supabase
-            response = self.client.storage.from_(self.USER_GARMENTS_BUCKET).upload(
-                path=storage_path,
-                file=file_content,
-                file_options={
-                    "content-type": file.content_type,
-                    "upsert": False  # Don't overwrite existing files
-                }
-            )
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    response = self.client.storage.from_(self.USER_GARMENTS_BUCKET).upload(
+                        path=storage_path,
+                        file=file_content,
+                        file_options={
+                            "content-type": file.content_type,
+                            "upsert": False  # Don't overwrite existing files
+                        }
+                    )
+                    
+                    # Success - break out of retry loop
+                    break
+                    
+                except Exception as e:
+                    last_exception = e
+                    error_str = str(e).lower()
+                    
+                    # Check if it's a transient error worth retrying
+                    is_transient = any(keyword in error_str for keyword in [
+                        'timeout', 'connection', 'network', 'temporary',
+                        'unavailable', 'service', '503', '502', '504'
+                    ])
+                    
+                    if not is_transient or attempt >= max_attempts:
+                        # Not a transient error or max attempts reached
+                        logger.error(
+                            f"Garment upload failed after {attempt} attempt(s): {e}",
+                            exc_info=True
+                        )
+                        raise StorageErrorException(
+                            operation="upload_garment",
+                            reason=f"Upload failed after {attempt} attempts: {str(e)}"
+                        )
+                    
+                    # Log retry attempt
+                    logger.warning(
+                        f"Garment upload failed (attempt {attempt}/{max_attempts}), "
+                        f"retrying in {attempt}s: {e}"
+                    )
+                    
+                    # Wait before retry with exponential backoff
+                    await asyncio.sleep(attempt)
             
             # Get public URL
             public_url = self.client.storage.from_(self.USER_GARMENTS_BUCKET).get_public_url(storage_path)
@@ -448,9 +575,47 @@ class SupabaseStorageService:
                 reason=str(e)
             )
     
+    async def _validate_clothing_content(self, file_content: bytes, content_type: str) -> bool:
+        """
+        Validate that the image contains clothing items.
+        
+        This is a basic validation that checks if the image can be opened.
+        More sophisticated validation using AI models can be added later.
+        
+        Args:
+            file_content: Image file bytes
+            content_type: MIME type of the image
+            
+        Returns:
+            True if validation passes, False otherwise
+        """
+        try:
+            # Basic validation: ensure image can be opened
+            image = Image.open(io.BytesIO(file_content))
+            
+            # Check image dimensions (clothing images should be reasonable size)
+            width, height = image.size
+            if width < 50 or height < 50:
+                logger.warning(f"Image too small: {width}x{height}")
+                return False
+            
+            if width > 4096 or height > 4096:
+                logger.warning(f"Image too large: {width}x{height}")
+                return False
+            
+            # TODO: Add AI-based clothing detection using Gemini Vision API
+            # For now, we accept all valid images
+            return True
+            
+        except Exception as e:
+            logger.error(f"Clothing validation error: {e}")
+            return False
+    
     def list_garments(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        List all garments for a specific user.
+        List all garments for a specific user with strict user isolation.
+        
+        Ensures that only garments belonging to the specified user are returned.
         
         Args:
             user_id: User ID for storage isolation
@@ -463,7 +628,7 @@ class SupabaseStorageService:
             StorageErrorException: If listing fails
         """
         try:
-            # List files in user's garment directory
+            # List files in user's garment directory (user isolation enforced by path)
             garments_path = f"{user_id}/garments"
             
             files = self.client.storage.from_(self.USER_GARMENTS_BUCKET).list(garments_path)
@@ -494,7 +659,7 @@ class SupabaseStorageService:
                 
                 garments.append(metadata)
             
-            logger.info(f"Listed {len(garments)} garments for user {user_id}")
+            logger.info(f"Listed {len(garments)} garments for user {user_id} (user isolation enforced)")
             return garments
             
         except Exception as e:
@@ -565,9 +730,10 @@ class SupabaseStorageService:
         image_type: str = "profile"
     ) -> Dict[str, Any]:
         """
-        Upload user's personal image (profile photo).
+        Upload user's personal image (profile photo) with retry logic.
         
         Validates file before upload and stores in user-images/{userId}/personal/
+        Retries up to 3 times on transient network failures.
         
         Args:
             user_id: User ID for storage isolation
@@ -583,7 +749,7 @@ class SupabaseStorageService:
         Raises:
             FileTooLargeException: If file exceeds size limit
             InvalidMimeTypeException: If file type not allowed
-            StorageErrorException: If upload fails
+            StorageErrorException: If upload fails after all retry attempts
         """
         try:
             # Validate file
@@ -603,15 +769,53 @@ class SupabaseStorageService:
             file_content = await file.read()
             await file.seek(0)
             
-            # Upload to Supabase (upsert to allow updates)
-            response = self.client.storage.from_(self.USER_IMAGES_BUCKET).upload(
-                path=storage_path,
-                file=file_content,
-                file_options={
-                    "content-type": file.content_type,
-                    "upsert": "true"  # Allow overwriting existing personal image
-                }
-            )
+            # Upload to Supabase with retry logic
+            max_attempts = 3
+            last_exception = None
+            
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    response = self.client.storage.from_(self.USER_IMAGES_BUCKET).upload(
+                        path=storage_path,
+                        file=file_content,
+                        file_options={
+                            "content-type": file.content_type,
+                            "upsert": "true"  # Allow overwriting existing personal image
+                        }
+                    )
+                    
+                    # Success - break out of retry loop
+                    break
+                    
+                except Exception as e:
+                    last_exception = e
+                    error_str = str(e).lower()
+                    
+                    # Check if it's a transient error worth retrying
+                    is_transient = any(keyword in error_str for keyword in [
+                        'timeout', 'connection', 'network', 'temporary',
+                        'unavailable', 'service', '503', '502', '504'
+                    ])
+                    
+                    if not is_transient or attempt >= max_attempts:
+                        # Not a transient error or max attempts reached
+                        logger.error(
+                            f"Personal image upload failed after {attempt} attempt(s): {e}",
+                            exc_info=True
+                        )
+                        raise StorageErrorException(
+                            operation="upload_personal_image",
+                            reason=f"Upload failed after {attempt} attempts: {str(e)}"
+                        )
+                    
+                    # Log retry attempt
+                    logger.warning(
+                        f"Personal image upload failed (attempt {attempt}/{max_attempts}), "
+                        f"retrying in {attempt}s: {e}"
+                    )
+                    
+                    # Wait before retry with exponential backoff
+                    await asyncio.sleep(attempt)
             
             # Get public URL
             public_url = self.client.storage.from_(self.USER_IMAGES_BUCKET).get_public_url(storage_path)
@@ -678,21 +882,22 @@ class SupabaseStorageService:
     def list_user_garments_db(self, user_id: str) -> List[Dict[str, Any]]:
         """
         List all garments for a user from Supabase database table.
+        Enforces strict user isolation by filtering on user_id.
         
         Args:
             user_id: User ID
             
         Returns:
-            List of garment records from database
+            List of garment records from database (only for specified user)
         """
         try:
             logger.info(f"Fetching garments from database for user: {user_id}")
             
-            # Query garments table
+            # Query garments table with user_id filter (user isolation)
             response = self.client.table('garments').select('*').eq('user_id', user_id).order('created_at', desc=True).execute()
             
             garments = response.data if response.data else []
-            logger.info(f"Found {len(garments)} garments in database for user {user_id}")
+            logger.info(f"Found {len(garments)} garments in database for user {user_id} (user isolation enforced)")
             
             return garments
             
@@ -704,21 +909,22 @@ class SupabaseStorageService:
     def list_user_results_db(self, user_id: str) -> List[Dict[str, Any]]:
         """
         List all try-on results for a user from Supabase database table.
+        Enforces strict user isolation by filtering on user_id.
         
         Args:
             user_id: User ID
             
         Returns:
-            List of try-on result records from database
+            List of try-on result records from database (only for specified user)
         """
         try:
             logger.info(f"Fetching try-on results from database for user: {user_id}")
             
-            # Query tryon_results table
+            # Query tryon_results table with user_id filter (user isolation)
             response = self.client.table('tryon_results').select('*').eq('user_id', user_id).order('created_at', desc=True).execute()
             
             results = response.data if response.data else []
-            logger.info(f"Found {len(results)} try-on results in database for user {user_id}")
+            logger.info(f"Found {len(results)} try-on results in database for user {user_id} (user isolation enforced)")
             
             return results
             
@@ -727,15 +933,27 @@ class SupabaseStorageService:
             # Return empty list instead of raising to allow graceful degradation
             return []
     
-    def save_garment_record_db(self, user_id: str, url: str, name: str, metadata: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
+    def save_garment_record_db(
+        self, 
+        user_id: str, 
+        url: str, 
+        name: str, 
+        metadata: Optional[Dict] = None,
+        file_size_bytes: Optional[int] = None,
+        content_type: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
-        Save garment record to Supabase database table.
+        Save garment record to Supabase database table with metadata.
+        
+        Stores timestamps, file sizes, and content type for analytics and tracking.
         
         Args:
             user_id: User ID
             url: Public URL to garment image
             name: Garment name
-            metadata: Optional metadata
+            metadata: Optional metadata (JSONB)
+            file_size_bytes: File size in bytes
+            content_type: MIME type (e.g., image/jpeg, image/png, image/webp)
             
         Returns:
             Created garment record or None if failed
@@ -743,18 +961,24 @@ class SupabaseStorageService:
         try:
             logger.info(f"Saving garment record to database for user: {user_id}")
             
+            # Prepare metadata with timestamp
+            enhanced_metadata = metadata or {}
+            enhanced_metadata['uploaded_at'] = datetime.utcnow().isoformat()
+            
             garment_data = {
                 'user_id': user_id,
                 'url': url,
                 'name': name,
-                'metadata': metadata or {},
+                'metadata': enhanced_metadata,
+                'file_size_bytes': file_size_bytes or 0,
+                'content_type': content_type or 'image/jpeg',
                 'created_at': datetime.utcnow().isoformat()
             }
             
             response = self.client.table('garments').insert(garment_data).execute()
             
             if response.data and len(response.data) > 0:
-                logger.info(f"Garment record saved to database: {response.data[0].get('id')}")
+                logger.info(f"Garment record saved to database: {response.data[0].get('id')} (size: {file_size_bytes} bytes)")
                 return response.data[0]
             else:
                 logger.warning("Failed to save garment record to database")
@@ -770,17 +994,24 @@ class SupabaseStorageService:
         personal_image_url: str, 
         garment_url: str, 
         result_url: str, 
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        model_version: str = "catvton-v1",
+        processing_time_seconds: float = 0.0
     ) -> Optional[Dict[str, Any]]:
         """
-        Save try-on result to Supabase database table.
+        Save try-on result to Supabase database table with metadata.
+        
+        Stores timestamps, model version, processing time, and other metadata
+        for analytics and tracking.
         
         Args:
             user_id: User ID
             personal_image_url: URL to personal image
             garment_url: URL to garment image
             result_url: URL to result image
-            metadata: Optional metadata
+            metadata: Optional metadata (JSONB) - includes inference params
+            model_version: Model version used (e.g., catvton-v1)
+            processing_time_seconds: Processing time in seconds
             
         Returns:
             Created result record or None if failed
@@ -788,20 +1019,31 @@ class SupabaseStorageService:
         try:
             logger.info(f"Saving try-on result to database for user: {user_id}")
             
+            # Prepare enhanced metadata with timestamp and processing info
+            enhanced_metadata = metadata or {}
+            enhanced_metadata['saved_at'] = datetime.utcnow().isoformat()
+            enhanced_metadata['model_version'] = model_version
+            enhanced_metadata['processing_time_seconds'] = processing_time_seconds
+            
             result_data = {
                 'user_id': user_id,
                 'personal_image_url': personal_image_url,
                 'garment_url': garment_url,
                 'result_url': result_url,
                 'status': 'completed',
-                'metadata': metadata or {},
+                'metadata': enhanced_metadata,
+                'model_version': model_version,
+                'processing_time_seconds': processing_time_seconds,
                 'created_at': datetime.utcnow().isoformat()
             }
             
             response = self.client.table('tryon_results').insert(result_data).execute()
             
             if response.data and len(response.data) > 0:
-                logger.info(f"Try-on result saved to database: {response.data[0].get('id')}")
+                logger.info(
+                    f"Try-on result saved to database: {response.data[0].get('id')} "
+                    f"(model: {model_version}, time: {processing_time_seconds:.2f}s)"
+                )
                 return response.data[0]
             else:
                 logger.warning("Failed to save try-on result to database")
